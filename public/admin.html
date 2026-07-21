@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panel de administrador — Dominó Online</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .admin-wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #2f6b58; }
+  th { color: #cfe3da; font-weight: 600; }
+  .section-title { margin-top: 28px; }
+  .badge-pendiente { color: #e0a63e; font-weight: 600; }
+  .badge-pagado { color: #7fd99a; font-weight: 600; }
+  .mini-btn { width: auto; padding: 5px 10px; font-size: 12px; margin: 0; }
+  .empty-msg { color: #9fc9b8; font-size: 13px; }
+</style>
+</head>
+<body>
+
+  <div id="admin-login" class="screen">
+    <h1>Panel de administrador</h1>
+    <div class="card">
+      <label>Contraseña de administrador</label>
+      <input id="admin-password" type="password" placeholder="Contraseña" />
+      <button id="admin-login-btn">Entrar</button>
+      <p id="admin-login-error" style="color:#ff8a80;font-size:13px;text-align:center;"></p>
+    </div>
+  </div>
+
+  <div id="admin-panel" class="admin-wrap hidden">
+    <h1>Panel de administrador — Dominó Online</h1>
+
+    <h2 class="section-title">Solicitudes de monetización</h2>
+    <table id="monetization-table">
+      <thead><tr><th>Fecha</th><th>Nombre público</th><th>Nombre legal</th><th>Seguidores</th><th>Documento</th><th>Estado</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title">Pedidos de retiro</h2>
+    <table id="withdrawals-table">
+      <thead><tr><th>Fecha</th><th>Jugador</th><th>PayPal</th><th>Gemas</th><th>Le corresponde</th><th>Tu comisión</th><th>Estado</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title">Usuarios registrados</h2>
+    <table id="users-table">
+      <thead><tr><th>Nombre</th><th>Email</th><th>PayPal</th><th>Gemas actuales</th><th>Seguidores</th><th>Monetización</th><th>Registrado</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title">Salas activas ahora</h2>
+    <table id="rooms-table">
+      <thead><tr><th>Código</th><th>Capacidad</th><th>Jugadores</th><th>Espectadores</th><th>Estado</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <button id="refresh-btn" style="max-width:200px;">Actualizar</button>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TableLive</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="auth" class="screen">
+    <div style="text-align:center;margin-bottom:10px;">
+      <select id="lang-select" style="width:auto;display:inline-block;">
+        <option value="es">🇪🇸 Español</option>
+        <option value="en">🇺🇸 English</option>
+        <option value="pt">🇧🇷 Português</option>
+        <option value="fr">🇫🇷 Français</option>
+        <option value="de">🇩🇪 Deutsch</option>
+        <option value="it">🇮🇹 Italiano</option>
+        <option value="zh">🇨🇳 中文</option>
+        <option value="ja">🇯🇵 日本語</option>
+        <option value="ru">🇷🇺 Русский</option>
+        <option value="ar">🇸🇦 العربية</option>
+        <option value="hi">🇮🇳 हिन्दी</option>
+        <option value="tr">🇹🇷 Türkçe</option>
+      </select>
+    </div>
+    <h1 data-i18n="game_title">Dominó Online</h1>
+    <div class="card">
+      <div class="tabs">
+        <button id="tab-login" class="tab-btn selected" data-i18n="tab_login">Iniciar sesión</button>
+        <button id="tab-register" class="tab-btn" data-i18n="tab_register">Crear cuenta</button>
+      </div>
+
+      <div id="login-form">
+        <label data-i18n="label_email">Email</label>
+        <input id="login-email" type="text" placeholder="tu-email@ejemplo.com" />
+        <label data-i18n="label_password">Contraseña</label>
+        <input id="login-password" type="password" placeholder="Tu contraseña" />
+        <button id="login-btn" data-i18n="btn_enter">Entrar</button>
+      </div>
+
+      <div id="register-form" class="hidden">
+        <label data-i18n="label_username">Tu nombre de usuario (público)</label>
+        <input id="reg-name" type="text" placeholder="Cómo te van a ver los demás" maxlength="18" />
+        <label data-i18n="label_legalname">Tu nombre completo (legal)</label>
+        <input id="reg-legalname" type="text" placeholder="Nombre y apellido, como en tu documento" />
+        <label data-i18n="label_phone">Teléfono</label>
+        <input id="reg-phone" type="text" placeholder="+56 9 1234 5678" />
+        <label data-i18n="label_country">País</label>
+        <select id="reg-country"></select>
+        <label data-i18n="label_language">Idioma</label>
+        <select id="reg-language">
+          <option value="es">🇪🇸 Español</option>
+          <option value="en">🇺🇸 English</option>
+          <option value="pt">🇧🇷 Português</option>
+          <option value="fr">🇫🇷 Français</option>
+          <option value="de">🇩🇪 Deutsch</option>
+          <option value="it">🇮🇹 Italiano</option>
+          <option value="zh">🇨🇳 中文</option>
+          <option value="ja">🇯🇵 日本語</option>
+          <option value="ru">🇷🇺 Русский</option>
+          <option value="ar">🇸🇦 العربية</option>
+          <option value="hi">🇮🇳 हिन्दी</option>
+          <option value="tr">🇹🇷 Türkçe</option>
+        </select>
+        <label>Foto de perfil (opcional)</label>
+        <input id="reg-avatar" type="file" accept="image/*" />
+        <label data-i18n="label_email">Email</label>
+        <input id="reg-email" type="text" placeholder="tu-email@ejemplo.com" />
+        <label data-i18n="label_password">Contraseña <span data-i18n="confirm_password_note">(mínimo 6 caracteres)</span></label>
+        <input id="reg-password" type="password" placeholder="Elegí una contraseña" />
+        <label data-i18n="label_paypal_email">Tu email de PayPal (para recibir tus regalos)</label>
+        <input id="reg-paypal" type="text" placeholder="tu-email-de-paypal@ejemplo.com" />
+        <button id="register-btn" data-i18n="btn_create_account">Crear cuenta</button>
+      </div>
+
+      <p id="auth-error"></p>
+    </div>
+  </div>
+
+  <div id="spectate-prompt" class="screen hidden">
+    <h1>Vas a mirar en vivo</h1>
+    <div class="card">
+      <label>Tu nombre</label>
+      <input id="spectate-name-input" type="text" placeholder="Cómo te van a ver los demás" maxlength="18" />
+      <button id="spectate-enter-btn">Entrar a mirar</button>
+      <p style="font-size:12px;color:#9fc9b8;text-align:center;margin-top:10px;">
+        ¿Querés poder regalar gemas a los jugadores? <a href="#" id="spectate-login-link" style="color:#e0a63e;">Creá una cuenta o iniciá sesión</a>
+      </p>
+    </div>
+  </div>
+
+  <div id="spectate" class="screen hidden">
+    <h2>Mirando en vivo — Sala <span id="spectate-code"></span></h2>
+    <div id="spectate-info" style="text-align:center;font-size:13px;color:#cfe3da;"></div>
+  </div>
+
+  <div id="verify-screen" class="screen hidden">
+    <h1>Confirmá tu email</h1>
+    <div class="card">
+      <p style="font-size:13px;color:#cfe3da;">Te mandamos un código de 6 dígitos a tu email. Escribilo acá para confirmar tu cuenta.</p>
+      <label>Código de confirmación</label>
+      <input id="verify-code-input" type="text" maxlength="6" placeholder="123456" />
+      <button id="verify-submit-btn">Confirmar</button>
+      <p style="font-size:12px;text-align:center;margin-top:10px;">
+        ¿No te llegó? <a href="#" id="resend-code-link" style="color:#e0a63e;">Reenviar código</a>
+      </p>
+      <p id="verify-error"></p>
+    </div>
+  </div>
+
+  <div id="lobby" class="screen hidden">
+    <h1>Dominó Online</h1>
+    <div class="card">
+      <p id="lobby-name-label" style="font-size:13px;color:#cfe3da;"></p>
+
+      <div class="lobby-section">
+        <h3 data-i18n="create_room_title">Crear una sala nueva</h3>
+        <label data-i18n="how_many_players">¿Cuántos van a jugar?</label>
+        <div class="cap-row">
+          <button class="cap-btn" data-cap="2">2</button>
+          <button class="cap-btn" data-cap="3">3</button>
+          <button class="cap-btn" data-cap="4">4</button>
+        </div>
+        <div id="handsize-row" class="cap-row"></div>
+        <button id="create-btn" data-i18n="btn_create_room">Crear sala</button>
+      </div>
+
+      <div class="lobby-section">
+        <h3 data-i18n="join_room_title">Unirte a una sala</h3>
+        <input id="code-input" type="text" placeholder="Código de la sala" maxlength="5" style="text-transform:uppercase;" />
+        <button id="join-btn" data-i18n="btn_join">Unirme</button>
+      </div>
+
+      <p id="lobby-error"></p>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 data-i18n="live_now">🔴 En vivo ahora</h3>
+      <p style="font-size:12px;color:#9fc9b8;">Cualquier partida que esté jugándose ahora mismo, la puede ver cualquiera.</p>
+      <div id="live-rooms-list"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 data-i18n="search_players">Buscar jugadores</h3>
+      <input id="search-input" type="text" placeholder="Escribí un nombre..." />
+      <div id="search-results"></div>
+
+      <h3 style="margin-top:20px;" data-i18n="following">Gente que seguís</h3>
+      <div id="following-list"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 data-i18n="profile_title">Tu perfil y monetización</h3>
+      <img id="profile-avatar" src="" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;display:none;margin:0 auto 10px;" />
+      <p id="profile-followers" style="font-size:13px;color:#cfe3da;"></p>
+
+      <label>Email de PayPal</label>
+      <input id="profile-paypal" type="text" />
+      <label>Banco (opcional)</label>
+      <input id="profile-bank-name" type="text" placeholder="Nombre del banco" />
+      <label>Número de cuenta</label>
+      <input id="profile-bank-number" type="text" placeholder="Número de cuenta bancaria" />
+      <label>Titular de la cuenta</label>
+      <input id="profile-bank-holder" type="text" placeholder="Nombre del titular" />
+      <button id="save-payout-btn">Guardar datos de cobro</button>
+      <p id="payout-msg" style="font-size:12px;color:#cfe3da;"></p>
+
+      <div id="monetization-section" style="margin-top:18px;padding-top:14px;border-top:1px solid #2f6b58;">
+        <p id="monetization-status" style="font-size:13px;"></p>
+        <div id="monetization-form" class="hidden">
+          <label>Subí una foto de tu documento de identidad</label>
+          <input id="kyc-file" type="file" accept="image/*,.pdf" />
+          <button id="submit-monetization-btn">Enviar solicitud de monetización</button>
+        </div>
+        <p id="monetization-msg" style="font-size:12px;color:#cfe3da;"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="queue-confirm" class="end-picker hidden">
+    <div class="card">
+      <p id="queue-confirm-text"></p>
+      <button id="queue-confirm-yes">Sí, esperar en la fila</button>
+      <button id="queue-confirm-no">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="waiting" class="screen hidden">
+    <h2>Sala <span id="waiting-code"></span></h2>
+    <p>Compartí este código con los demás jugadores:</p>
+    <div id="waiting-code-big"></div>
+    <p id="waiting-count"></p>
+    <ul id="waiting-list"></ul>
+    <button id="copy-spectate-link">Copiar link para que otros miren en vivo</button>
+    <p id="spectate-link-msg" style="font-size:12px;text-align:center;color:#cfe3da;"></p>
+  </div>
+
+  <div id="game" class="screen hidden">
+    <div id="video-bar" class="video-expanded"></div>
+
+    <div id="play-toggle-row">
+      <button id="toggle-domino-btn">🎲 Jugar dominó</button>
+      <button id="toggle-camera-panel-btn">🎥 Cámara</button>
+      <button id="toggle-settings-panel-btn">⚙️ Ajustes</button>
+    </div>
+
+    <div id="camera-panel" class="hidden">
+      <div id="camera-guests-bar">
+        <span id="camera-guests-count"></span>
+        <button id="request-camera-btn">🎥 Pedir subir a cámara</button>
+        <button id="make-admin-btn">👑 Hacer admin de live</button>
+      </div>
+      <div id="camera-requests-panel" class="hidden"></div>
+    </div>
+
+    <div id="settings-panel" class="hidden">
+      <p class="settings-label">Tapete de la mesa</p>
+      <div class="mesa-swatches">
+        <button class="mesa-swatch active" data-felt="green" title="Tapete verde"></button>
+        <button class="mesa-swatch" data-felt="red" title="Tapete rojo"></button>
+        <button class="mesa-swatch" data-felt="blue" title="Tapete azul"></button>
+        <button class="mesa-swatch" data-felt="purple" title="Tapete morado"></button>
+      </div>
+      <p class="settings-label">Estilo de fichas</p>
+      <div class="mesa-swatches">
+        <button class="style-swatch active" data-style="numbers">🔢 Números</button>
+        <button class="style-swatch" data-style="dots">⚫ Puntos</button>
+      </div>
+    </div>
+
+    <div id="wallet-bar">
+      <span>💎 <span id="wallet-balance">0</span> gemas</span>
+      <button id="buy-gems-btn" data-i18n="btn_buy_gems">Comprar gemas</button>
+      <button id="withdraw-btn" data-i18n="btn_withdraw">Retirar</button>
+    </div>
+
+    <div id="top-info">
+      <span id="room-label"></span>
+      <span id="turn-label"></span>
+      <span id="spectator-count"></span>
+      <button id="share-btn" title="Compartir">🔗 Compartir</button>
+      <button id="logout-game-btn" title="Cerrar sesión">🚪 Salir</button>
+    </div>
+
+    <div id="tiktok-rail">
+      <button class="rail-btn" id="rail-like-btn">❤️<span id="rail-like-count">0</span></button>
+      <button class="rail-btn" id="rail-gift-btn">🎁</button>
+      <button class="rail-btn" id="rail-chat-btn">💬</button>
+      <button class="rail-btn" id="rail-share-btn">🔗</button>
+      <button class="rail-btn emoji-btn" data-emoji="😂">😂</button>
+      <button class="rail-btn emoji-btn" data-emoji="😢">😢</button>
+      <button class="rail-btn emoji-btn" data-emoji="😮">😮</button>
+      <button class="rail-btn emoji-btn" data-emoji="👏">👏</button>
+      <button class="rail-btn" id="rail-help-btn">❓</button>
+    </div>
+
+    <div id="reaction-layer"></div>
+
+    <div id="domino-game-panel" class="hidden">
+      <div id="turn-order"></div>
+
+      <div id="opponents"></div>
+
+      <div id="board-wrap">
+        <div id="boneyard-pile" class="hidden">
+          <span id="boneyard-count-label"></span>
+          <div id="boneyard-row"></div>
+        </div>
+        <div id="table-mesa">
+          <div id="mesa-logo">TableLive</div>
+          <div id="board-inner"></div>
+        </div>
+      </div>
+
+      <div id="play-actions" class="hidden">
+        <p id="play-actions-label"></p>
+        <div id="play-actions-buttons"></div>
+      </div>
+
+      <div id="my-area">
+        <div id="my-hand"></div>
+        <button id="pass-btn" class="hidden" data-i18n="btn_pass">Pasar (no tengo ficha que encaje)</button>
+        <button id="undo-btn" class="hidden" data-i18n="btn_undo">Deshacer última jugada</button>
+      </div>
+
+      <div id="gameover-wrap" class="hidden">
+        <div class="card">
+          <p id="gameover-text"></p>
+          <div id="ranking-list"></div>
+          <button id="rematch-btn" data-i18n="btn_play_again">Jugar de nuevo</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="live-chat">
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Escribí un comentario..." data-i18n-placeholder="comment_placeholder" maxlength="200" />
+        <button id="chat-send-btn" data-i18n="btn_send">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="buy-modal" class="end-picker hidden">
+    <div class="card" style="max-height:80vh;overflow-y:auto;">
+      <h3>Comprar gemas</h3>
+      <p id="paypal-warning" class="hidden">La tienda todavía no está configurada con PayPal.</p>
+      <div id="pack-grid"></div>
+      <button id="close-buy-modal">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="withdraw-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>Retirar gemas</h3>
+      <p style="font-size:13px;color:#cfe3da;">100 gemas ≈ USD $1.00. Se descuenta una comisión de plataforma del 25%; recibís el 75% en tu PayPal registrado.</p>
+      <label>Cantidad de gemas a retirar</label>
+      <input id="withdraw-amount" type="text" placeholder="Ej: 500" />
+      <button id="submit-withdraw">Pedir retiro</button>
+      <button id="close-withdraw-modal">Cerrar</button>
+      <p id="withdraw-msg"></p>
+    </div>
+  </div>
+
+  <div id="gift-toast"></div>
+
+  <div id="private-chat-modal" class="end-picker hidden">
+    <div class="card">
+      <h3 id="private-chat-title"></h3>
+      <div id="private-chat-messages" style="max-height:180px;overflow-y:auto;margin-bottom:8px;"></div>
+      <input id="private-chat-input" type="text" placeholder="Escribí en privado..." />
+      <button id="private-chat-send">Enviar</button>
+      <button id="private-chat-voice">🔒 Abrir sala de voz privada</button>
+      <button id="close-private-chat">Cerrar</button>
+    </div>
+  </div>
+
+  <div id="help-card-modal" class="end-picker hidden">
+    <div class="card" style="max-height:80vh;overflow-y:auto;">
+      <h3 data-i18n="how_to_play">❓ Cómo se juega al dominó</h3>
+      <p style="font-size:13px;line-height:1.6;color:#cfe3da;">
+        Cada ficha tiene dos mitades con números del 0 al 6. En tu turno, tenés que
+        poner una ficha que tenga el mismo número que uno de los dos extremos del
+        tablero, pegándola ahí.<br><br>
+        Si no tenés ninguna ficha que encaje, tomás una del montón (si queda alguna).
+        Si el montón está vacío y tampoco podés jugar, pasás el turno.<br><br>
+        <b>¿Cómo se gana?</b> El primero en quedarse sin fichas gana la partida. Si
+        nadie puede jugar más (se traba), gana quien tenga menos puntos sumados en
+        las fichas que le quedan en la mano.<br><br>
+        <b>Tip:</b> tocá una ficha de tu mano para seleccionarla, y después elegí de
+        qué lado del tablero jugarla.
+      </p>
+      <button id="close-help-card">Entendido</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://meet.jit.si/external_api.js"></script>
+  <script src="i18n.js"></script>
+  <script src="countries.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
