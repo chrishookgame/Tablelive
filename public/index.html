@@ -2,8 +2,21 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>TableLive</title>
+<meta name="description" content="Jugá al dominó en vivo, mirá transmisiones y chateá con otros usuarios." />
+
+<!-- PWA: esto es lo que hace que el navegador ofrezca "Instalar app" en celular y computadora -->
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#14332b" />
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="TableLive" />
+<meta name="mobile-web-app-capable" content="yes" />
+
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -25,7 +38,9 @@
         <option value="tr">🇹🇷 Türkçe</option>
       </select>
     </div>
-    <h1 data-i18n="game_title">Dominó Online</h1>
+    <div id="auth-logo-wrap">
+      <img src="/logo-full.png" alt="TableLive" id="auth-logo" />
+    </div>
     <div class="card">
       <div class="tabs">
         <button id="tab-login" class="tab-btn selected" data-i18n="tab_login">Iniciar sesión</button>
@@ -86,7 +101,7 @@
       <input id="spectate-name-input" type="text" placeholder="Cómo te van a ver los demás" maxlength="18" />
       <button id="spectate-enter-btn">Entrar a mirar</button>
       <p style="font-size:12px;color:#9fc9b8;text-align:center;margin-top:10px;">
-        ¿Querés poder regalar gemas a los jugadores? <a href="#" id="spectate-login-link" style="color:#e0a63e;">Creá una cuenta o iniciá sesión</a>
+        ¿Querés poder regalar monedas a los jugadores? <a href="#" id="spectate-login-link" style="color:#e0a63e;">Creá una cuenta o iniciá sesión</a>
       </p>
     </div>
   </div>
@@ -111,11 +126,313 @@
   </div>
 
   <div id="lobby" class="screen hidden">
-    <h1>Dominó Online</h1>
-    <div class="card">
-      <p id="lobby-name-label" style="font-size:13px;color:#cfe3da;"></p>
+    <div id="feed-header">
+      <img src="/icons/icon-192.png" alt="" id="feed-header-logo" />
+      <span id="feed-header-title">TableLive</span>
+      <p id="lobby-name-label"></p>
+    </div>
 
-      <div class="lobby-section">
+    <!-- ---- Tab: Feed (estilo TikTok, es lo primero que se ve) ---- -->
+    <div id="feed-tab" class="lobby-tab">
+      <div id="feed-switch">
+        <button class="feed-switch-btn selected" data-feed="live" data-i18n="feed_live">🔴 En vivo</button>
+        <button class="feed-switch-btn" data-feed="videos" data-i18n="feed_videos">✨ Para ti</button>
+      </div>
+
+      <div id="feed-live-view">
+        <button id="start-live-from-feed-btn">🔴 Empezar tu transmisión en vivo</button>
+        <p style="font-size:12px;color:#9fc9b8;text-align:center;">Cualquier partida que esté jugándose ahora mismo, la puede ver cualquiera.</p>
+        <div id="live-rooms-list"></div>
+      </div>
+
+      <div id="feed-videos-view" class="hidden">
+        <div id="videos-feed"></div>
+      </div>
+    </div>
+
+    <!-- ---- Tab: Buscar ---- -->
+    <div id="search-tab" class="lobby-tab hidden">
+      <div class="card">
+        <h3 data-i18n="search_players">Buscar jugadores</h3>
+        <input id="search-input" type="text" placeholder="Escribí un nombre..." />
+        <div id="search-results"></div>
+
+        <h3 style="margin-top:20px;" data-i18n="following">Gente que seguís</h3>
+        <div id="following-list"></div>
+      </div>
+    </div>
+
+    <!-- ---- Tab: Mensajes ---- -->
+    <div id="messages-tab" class="lobby-tab hidden">
+      <div class="card" id="messages-list-card">
+        <h3 data-i18n="messages_title">Mensajes</h3>
+        <div id="conversations-list"></div>
+      </div>
+      <div class="card hidden" id="thread-card">
+        <button id="thread-back-btn" style="width:auto;padding:4px 10px;margin-bottom:10px;">← <span data-i18n="btn_back">Volver</span></button>
+        <h3 id="thread-with-name"></h3>
+        <div id="thread-messages"></div>
+        <div id="thread-input-row" style="display:flex;gap:6px;">
+          <input id="thread-input" type="text" placeholder="Escribí un mensaje..." maxlength="500" />
+          <button id="thread-send-btn" style="width:auto;padding:8px 14px;margin:0;" data-i18n="btn_send">Enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Tab: Perfil ---- -->
+    <div id="profile-tab" class="lobby-tab hidden">
+      <div class="card">
+        <h3 data-i18n="profile_title">Tu perfil</h3>
+
+        <div style="text-align:center;">
+          <div style="position:relative;width:84px;height:84px;margin:0 auto 10px;">
+            <img id="profile-avatar" src="" alt="" style="width:84px;height:84px;border-radius:50%;object-fit:cover;display:none;background:#0f2b23;" />
+            <div id="profile-avatar-fallback" style="width:84px;height:84px;border-radius:50%;background:#e0a63e;color:#1c1c1c;font-size:32px;font-weight:700;display:flex;align-items:center;justify-content:center;"></div>
+            <button id="change-avatar-btn" title="Cambiar foto" style="position:absolute;bottom:-2px;right:-2px;width:30px;height:30px;min-width:30px;border-radius:50%;padding:0;margin:0;font-size:14px;">📷</button>
+          </div>
+          <input id="avatar-file-input" type="file" accept="image/*" class="hidden" />
+        </div>
+
+        <label>Tu nombre</label>
+        <input id="profile-name-input" type="text" maxlength="18" />
+        <button id="save-profile-btn">Guardar cambios</button>
+        <p id="profile-save-msg" style="font-size:12px;color:#cfe3da;"></p>
+
+        <p id="profile-followers" style="font-size:13px;color:#cfe3da;margin-top:10px;text-align:center;"></p>
+      </div>
+
+      <div class="card hidden" id="admin-access-card" style="margin-top:16px;">
+        <h3>🛡️ Panel de administrador</h3>
+        <p id="admin-access-msg" style="font-size:12px;color:#cfe3da;margin-bottom:10px;"></p>
+        <button id="go-to-admin-btn">Entrar al panel</button>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>📲 Instalar la app</h3>
+        <p style="font-size:12px;color:#cfe3da;margin-bottom:10px;">Descargá TableLive como app en tu celular o computadora — abre más rápido y sin la barra del navegador.</p>
+        <button id="install-app-btn" class="hidden">📲 Instalar TableLive</button>
+        <p id="install-ios-hint" class="hidden" style="font-size:12px;color:#9fc9b8;">
+          En iPhone/iPad: tocá el botón de <b>Compartir</b> (el cuadradito con la flecha) en Safari y elegí <b>"Agregar a inicio"</b>.
+        </p>
+        <p id="install-already-hint" class="hidden" style="font-size:12px;color:#8fd4a8;">✅ Ya estás usando la app instalada.</p>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>🎥 Mis grabaciones</h3>
+        <p style="font-size:12px;color:#9fc9b8;margin-bottom:10px;">Se guardan 5 días y después se borran solas.</p>
+        <div id="my-recordings-list"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>🤝 Reuniones privadas</h3>
+        <p style="font-size:12px;color:#9fc9b8;margin-bottom:10px;">30 minutos gratis por reunión. Con un plan activo, sin límite de tiempo.</p>
+        <p id="meeting-plan-status" style="font-size:13px;color:#e0a63e;font-weight:600;margin-bottom:10px;"></p>
+        <div id="meeting-plans-grid" style="display:flex;flex-direction:column;gap:8px;"></div>
+
+        <p class="settings-label" style="margin-top:14px;">📅 Mis reuniones programadas</p>
+        <div id="my-scheduled-meetings-list"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>🛍️ Tienda</h3>
+        <p style="font-size:12px;color:#9fc9b8;margin-bottom:10px;">Insignias, colores de nombre y marcos de perfil — se pagan con monedas 🪙 y son tuyos para siempre.</p>
+        <div class="mesa-swatches" id="store-category-tabs">
+          <button class="cam-filter-swatch active" data-cat="badge">🏅 Insignias</button>
+          <button class="cam-filter-swatch" data-cat="color">🎨 Colores</button>
+          <button class="cam-filter-swatch" data-cat="frame">🖼️ Marcos</button>
+        </div>
+        <div id="store-items-grid"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>💰 Cobros</h3>
+        <label>Email de PayPal</label>
+        <input id="profile-paypal" type="text" />
+        <label>Banco (opcional)</label>
+        <input id="profile-bank-name" type="text" placeholder="Nombre del banco" />
+        <label>Número de cuenta</label>
+        <input id="profile-bank-number" type="text" placeholder="Número de cuenta bancaria" />
+        <label>Titular de la cuenta</label>
+        <input id="profile-bank-holder" type="text" placeholder="Nombre del titular" />
+        <button id="save-payout-btn">Guardar datos de cobro</button>
+        <p id="payout-msg" style="font-size:12px;color:#cfe3da;"></p>
+      </div>
+
+      <div class="card" id="monetization-section" style="margin-top:16px;">
+        <h3>⭐ Monetización</h3>
+        <p id="monetization-status" style="font-size:13px;"></p>
+        <div id="monetization-form" class="hidden">
+          <label>Subí una foto de tu documento de identidad</label>
+          <input id="kyc-file" type="file" accept="image/*,.pdf" />
+          <button id="submit-monetization-btn">Enviar solicitud de monetización</button>
+        </div>
+        <p id="monetization-msg" style="font-size:12px;color:#cfe3da;"></p>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>🌟 Mis suscripciones</h3>
+        <p style="font-size:12px;color:#9fc9b8;">Creadores que apoyás cada mes.</p>
+        <div id="my-subscriptions-list"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>🌟 Mis suscriptores</h3>
+        <p id="my-subscribers-summary" style="font-size:13px;color:#e0a63e;font-weight:600;"></p>
+        <div id="my-subscribers-list"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>💰 Ganancias</h3>
+        <div id="earnings-summary" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
+          <p style="font-size:13px;">💎 Saldo actual: <b id="earnings-balance">0</b></p>
+          <p style="font-size:13px;">🎁 Ganado con regalos: <b id="earnings-gifts">0</b> 💎</p>
+          <p style="font-size:13px;">🌟 Ganado con suscripciones: <b id="earnings-subs">0</b> 💎 (aprox.)</p>
+        </div>
+        <p class="settings-label">Actividad reciente</p>
+        <div id="earnings-activity"></div>
+        <p class="settings-label" style="margin-top:14px;">Mis retiros</p>
+        <div id="my-withdrawals-list"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 data-i18n="my_videos">Mis videos</h3>
+        <div id="my-videos-grid"></div>
+      </div>
+
+      <p style="text-align:center;margin-top:18px;"><a href="#" id="logout-link" style="color:#e0a63e;">Cerrar sesión</a></p>
+    </div>
+
+    <!-- ---- Nav inferior estilo TikTok, con el botón + de subir contenido en el medio ---- -->
+    <nav id="bottom-nav">
+      <button class="nav-btn selected" data-tab="feed">🏠<span data-i18n="nav_home">Inicio</span></button>
+      <button class="nav-btn" data-tab="search">🔍<span data-i18n="nav_search">Buscar</span></button>
+      <button class="nav-plain-btn" id="domino-fab-btn" title="Dominó">🎲<span data-i18n="nav_domino_nav">Dominó</span></button>
+      <button id="create-fab-btn" title="Crear">➕</button>
+      <button class="nav-btn" data-tab="messages">💬<span id="messages-unread-dot" class="hidden"></span><span data-i18n="nav_messages">Mensajes</span></button>
+      <button class="nav-btn" data-tab="profile">👤<span data-i18n="nav_profile">Perfil</span></button>
+    </nav>
+  </div>
+
+  <!-- ---- Modal: crear contenido, estilo TikTok (Ir en vivo / Subir video / Foto / Texto) ---- -->
+  <div id="create-modal" class="end-picker hidden">
+    <div class="card">
+      <div id="create-menu">
+        <h3 data-i18n="create_title">Crear</h3>
+        <button class="create-option-btn" id="create-opt-live">🔴 <span data-i18n="create_go_live">Ir en vivo (jugar dominó)</span></button>
+        <button class="create-option-btn" id="create-opt-meeting">🤝 Nueva reunión privada</button>
+        <button class="create-option-btn" id="create-opt-join-meeting">🔑 Unirme a una reunión</button>
+        <button class="create-option-btn" id="create-opt-schedule-meeting">📅 Programar una reunión</button>
+        <button class="create-option-btn" id="create-opt-video">🎥 <span data-i18n="create_upload_video">Subir video</span></button>
+        <button class="create-option-btn" id="create-opt-photo">🖼️ <span data-i18n="create_upload_photo">Subir foto</span></button>
+        <button class="create-option-btn" id="create-opt-text">📝 <span data-i18n="create_publish_text">Publicar texto</span></button>
+        <button id="close-create-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cerrar</button>
+      </div>
+
+      <div id="create-upload-form" class="hidden">
+        <button id="create-form-back" style="width:auto;padding:4px 10px;margin-bottom:6px;">← <span data-i18n="btn_back">Volver</span></button>
+        <h3 id="create-form-title"></h3>
+        <p id="create-video-limit-hint" class="hidden" style="font-size:12px;color:#e0a63e;"></p>
+
+        <div id="create-video-source-row" class="hidden" style="display:flex;gap:8px;margin-bottom:8px;">
+          <button id="create-choose-file-btn" style="flex:1;width:auto;">📁 Elegir de la galería</button>
+          <button id="create-record-toggle-btn" style="flex:1;width:auto;background:#0f2b23;color:#fff;border:1px solid #2f6b58;">🔴 Grabar ahora</button>
+        </div>
+
+        <div id="create-record-box" class="hidden">
+          <video id="create-record-preview" autoplay muted playsinline style="width:100%;border-radius:10px;max-height:220px;background:#000;"></video>
+          <p id="create-record-timer" style="text-align:center;font-size:13px;color:#e0a63e;margin:6px 0;"></p>
+          <div style="display:flex;gap:8px;">
+            <button id="create-record-start-btn" style="flex:1;width:auto;">🔴 Empezar a grabar</button>
+            <button id="create-record-stop-btn" class="hidden" style="flex:1;width:auto;background:#7a2020;color:#fff;">⏹ Detener</button>
+            <button id="create-record-cancel-btn" style="flex:1;width:auto;background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cancelar</button>
+          </div>
+        </div>
+
+        <input id="create-file-input" type="file" class="hidden" />
+        <video id="create-video-preview" class="hidden" controls style="width:100%;border-radius:10px;max-height:220px;"></video>
+        <img id="create-photo-preview" class="hidden" style="width:100%;border-radius:10px;max-height:220px;object-fit:cover;" />
+        <textarea id="create-caption-input" placeholder="Escribí una descripción..." maxlength="300" rows="3" style="width:100%;resize:vertical;"></textarea>
+        <p id="create-error" style="color:#ff8a80;font-size:13px;"></p>
+        <button id="create-publish-btn" data-i18n="btn_publish">Publicar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---- Visor de una publicación a pantalla completa ---- -->
+  <div id="post-viewer" class="screen hidden">
+    <div id="post-viewer-media"></div>
+    <div id="post-viewer-top">
+      <button id="post-viewer-close">✕</button>
+    </div>
+    <div id="post-viewer-nav">
+      <button id="post-nav-up" title="Anterior">▲</button>
+      <button id="post-nav-down" title="Siguiente">▼</button>
+    </div>
+    <div id="post-viewer-info">
+      <div id="post-viewer-author-row">
+        <img id="post-viewer-avatar" src="" alt="" />
+        <span id="post-viewer-avatar-fallback"></span>
+        <p id="post-viewer-author"></p>
+      </div>
+      <p id="post-viewer-caption"></p>
+    </div>
+    <div id="post-viewer-rail">
+      <button class="rail-btn" id="post-like-btn">❤️<span id="post-like-count">0</span></button>
+      <button class="rail-btn" id="post-comment-btn">💬<span id="post-comment-count">0</span></button>
+      <button class="rail-btn" id="post-message-btn">✉️</button>
+      <button class="rail-btn" id="post-subscribe-btn">🌟</button>
+      <button class="rail-btn" id="post-share-btn">🔗</button>
+      <button class="rail-btn" id="post-download-btn">⬇️</button>
+      <button class="rail-btn" id="post-report-btn">🚩</button>
+    </div>
+  </div>
+
+  <!-- ---- Compartir una publicación por mensaje privado ---- -->
+  <div id="share-post-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>🔗 Compartir publicación</h3>
+      <input id="share-post-search" type="text" placeholder="Buscá a quién mandársela..." />
+      <div id="share-post-results"></div>
+      <p id="share-post-msg" style="font-size:12px;color:#8fd4a8;"></p>
+      <button id="close-share-post-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- ---- Denunciar una publicación ---- -->
+  <div id="report-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>🚩 Denunciar publicación</h3>
+      <label>Motivo</label>
+      <select id="report-reason">
+        <option value="spam">Spam</option>
+        <option value="contenido_inapropiado">Contenido inapropiado</option>
+        <option value="acoso">Acoso o bullying</option>
+        <option value="informacion_falsa">Información falsa</option>
+        <option value="otro">Otro</option>
+      </select>
+      <label>Contanos más (opcional)</label>
+      <textarea id="report-details" rows="3" maxlength="300" style="width:100%;resize:vertical;"></textarea>
+      <button id="submit-report-btn">Enviar denuncia</button>
+      <button id="close-report-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cancelar</button>
+      <p id="report-msg" style="font-size:12px;color:#8fd4a8;"></p>
+    </div>
+  </div>
+
+  <div id="post-comments-sheet" class="hidden">
+    <div id="post-comments-list"></div>
+    <div id="post-comments-input-row">
+      <input id="post-comment-input" type="text" placeholder="Escribí un comentario..." maxlength="300" />
+      <button id="post-comment-send-btn" data-i18n="btn_send">Enviar</button>
+    </div>
+    <button id="post-comments-close" style="width:auto;">✕</button>
+  </div>
+
+  <!-- ---- Modal: todas las configuraciones del dominó viven acá adentro ---- -->
+  <div id="domino-modal" class="end-picker hidden">
+    <div class="card">
+      <h3 data-i18n="nav_domino">🎲 Dominó</h3>
+
+      <div class="lobby-section" style="margin-top:0;padding-top:0;border-top:none;">
         <h3 data-i18n="create_room_title">Crear una sala nueva</h3>
         <label data-i18n="how_many_players">¿Cuántos van a jugar?</label>
         <div class="cap-row">
@@ -134,48 +451,7 @@
       </div>
 
       <p id="lobby-error"></p>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <h3 data-i18n="live_now">🔴 En vivo ahora</h3>
-      <p style="font-size:12px;color:#9fc9b8;">Cualquier partida que esté jugándose ahora mismo, la puede ver cualquiera.</p>
-      <div id="live-rooms-list"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <h3 data-i18n="search_players">Buscar jugadores</h3>
-      <input id="search-input" type="text" placeholder="Escribí un nombre..." />
-      <div id="search-results"></div>
-
-      <h3 style="margin-top:20px;" data-i18n="following">Gente que seguís</h3>
-      <div id="following-list"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <h3 data-i18n="profile_title">Tu perfil y monetización</h3>
-      <img id="profile-avatar" src="" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;display:none;margin:0 auto 10px;" />
-      <p id="profile-followers" style="font-size:13px;color:#cfe3da;"></p>
-
-      <label>Email de PayPal</label>
-      <input id="profile-paypal" type="text" />
-      <label>Banco (opcional)</label>
-      <input id="profile-bank-name" type="text" placeholder="Nombre del banco" />
-      <label>Número de cuenta</label>
-      <input id="profile-bank-number" type="text" placeholder="Número de cuenta bancaria" />
-      <label>Titular de la cuenta</label>
-      <input id="profile-bank-holder" type="text" placeholder="Nombre del titular" />
-      <button id="save-payout-btn">Guardar datos de cobro</button>
-      <p id="payout-msg" style="font-size:12px;color:#cfe3da;"></p>
-
-      <div id="monetization-section" style="margin-top:18px;padding-top:14px;border-top:1px solid #2f6b58;">
-        <p id="monetization-status" style="font-size:13px;"></p>
-        <div id="monetization-form" class="hidden">
-          <label>Subí una foto de tu documento de identidad</label>
-          <input id="kyc-file" type="file" accept="image/*,.pdf" />
-          <button id="submit-monetization-btn">Enviar solicitud de monetización</button>
-        </div>
-        <p id="monetization-msg" style="font-size:12px;color:#cfe3da;"></p>
-      </div>
+      <button id="close-domino-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cerrar</button>
     </div>
   </div>
 
@@ -197,25 +473,257 @@
     <p id="spectate-link-msg" style="font-size:12px;text-align:center;color:#cfe3da;"></p>
   </div>
 
-  <div id="game" class="screen hidden">
-    <div id="video-bar" class="video-expanded"></div>
+  <div id="meeting-screen" class="screen hidden">
+    <div id="meeting-video-grid"></div>
+    <div id="meeting-top-bar">
+      <span id="meeting-code-label"></span>
+      <span id="meeting-timer"></span>
+      <div style="flex:1;"></div>
+      <button id="meeting-filters-btn" title="Filtros">🎨</button>
+      <button id="meeting-share-btn" title="Compartir código">🔗</button>
+      <button id="meeting-leave-btn" title="Salir">🚪</button>
+    </div>
+    <div id="meeting-filters-panel" class="hidden overlay-dropdown">
+      <p class="settings-label">Filtro de cámara (solo lo ves vos)</p>
+      <div class="mesa-swatches" id="meeting-cam-filter-row">
+        <button class="cam-filter-swatch active" data-filter="natural">✨ Natural</button>
+        <button class="cam-filter-swatch" data-filter="warm">🌇 Cálido</button>
+        <button class="cam-filter-swatch" data-filter="golden">🌅 Golden Hour</button>
+        <button class="cam-filter-swatch" data-filter="vintage">📻 Vintage</button>
+        <button class="cam-filter-swatch" data-filter="cinematic">🎬 Cinematic</button>
+        <button class="cam-filter-swatch" data-filter="vivid">🌈 Vivid</button>
+        <button class="cam-filter-swatch" data-filter="cool">❄️ Cool</button>
+        <button class="cam-filter-swatch" data-filter="bw">⚫ Black &amp; White</button>
+        <button class="cam-filter-swatch" data-filter="softglow">💫 Soft Glow</button>
+        <button class="cam-filter-swatch" data-filter="retro">📼 Retro</button>
+      </div>
 
-    <div id="play-toggle-row">
-      <button id="toggle-domino-btn">🎲 Jugar dominó</button>
-      <button id="toggle-camera-panel-btn">🎥 Cámara</button>
-      <button id="toggle-settings-panel-btn">⚙️ Ajustes</button>
+      <p class="settings-label">Fondo virtual (sin pantalla verde)</p>
+      <div class="vbg-row" id="vbg-row-meeting">
+        <button class="vbg-swatch active" data-vbg="none" data-vbg-ctx="meeting" style="background:#0f2b23;">Sin fondo</button>
+        <button class="vbg-swatch" data-vbg="blur" data-vbg-ctx="meeting" style="background:#0f2b23;">🌫️ Difuminar</button>
+        <button class="vbg-swatch" data-vbg="studio-verde" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/studio-verde.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="casino-night" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/casino-night.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="atardecer" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/atardecer.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="oficina-azul" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/oficina-azul.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="bokeh-dorado" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/bokeh-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="restaurante-dorado" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/restaurante-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="skyline-verde" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/skyline-verde.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="mundo-dorado" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/mundo-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="red-mundial" data-vbg-ctx="meeting" style="background:linear-gradient(160deg,#010403 0%,#0b3d2e 55%,#010403 100%);color:#d4a333;font-size:9px;">🌐 Animado</button>
+      </div>
+      <p id="vbg-msg-meeting" style="font-size:11px;color:#9fc9b8;"></p>
+    </div>
+    <div id="meeting-bottom-bar">
+      <button id="meeting-mic-btn">🔇 Prender mi micrófono</button>
+      <button id="meeting-cam-btn">🎥 Prender mi cámara</button>
+      <button id="meeting-record-btn">⏺️ Grabar</button>
+    </div>
+    <p id="meeting-limit-msg" class="hidden"></p>
+  </div>
+
+  <div id="join-meeting-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>🤝 Unirse a una reunión</h3>
+      <label>Código de la reunión</label>
+      <input id="join-meeting-code" type="text" placeholder="Ej: M-4F7K2" />
+      <button id="submit-join-meeting">Entrar</button>
+      <button id="close-join-meeting-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cancelar</button>
+      <p id="join-meeting-msg" style="font-size:12px;color:#ff8a80;"></p>
+    </div>
+  </div>
+
+  <div id="schedule-meeting-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>📅 Programar una reunión</h3>
+      <label>¿Cómo se llama? (obligatorio)</label>
+      <input id="schedule-meeting-label" type="text" placeholder="Ej: Reunión con el equipo" maxlength="60" />
+      <label>Fecha</label>
+      <input id="schedule-meeting-date" type="date" />
+      <label>Horario</label>
+      <input id="schedule-meeting-time" type="time" />
+      <label>Invitar por email (opcional — les llega el código a cada uno)</label>
+      <input id="schedule-meeting-emails" type="text" placeholder="email1@ejemplo.com, email2@ejemplo.com" />
+      <p style="font-size:11px;color:#9fc9b8;margin:2px 0 8px;">Separá varios emails con coma. A cada uno le llega una invitación prolija con el nombre del evento, la fecha y su código para entrar.</p>
+      <button id="submit-schedule-meeting">Reservar</button>
+      <button id="close-schedule-meeting-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cancelar</button>
+      <p id="schedule-meeting-msg" style="font-size:12px;color:#ff8a80;"></p>
+    </div>
+  </div>
+
+  <div id="game" class="screen hidden">
+    <div id="video-bar"></div>
+
+    <div id="top-info">
+      <div id="top-info-left">
+        <span id="live-timer">🔴 00:00</span>
+        <div id="host-badge" role="button" title="Ver perfil">
+          <img id="host-badge-avatar" src="" alt="" />
+          <span id="host-badge-fallback"></span>
+          <span id="room-label"></span>
+        </div>
+        <span id="turn-label"></span>
+        <span id="spectator-count"></span>
+        <span id="queue-count"></span>
+      </div>
+      <div id="top-info-right">
+        <button class="icon-toggle-btn" id="search-from-game-btn" title="Buscar usuarios">🔍</button>
+        <button class="icon-toggle-btn" id="toggle-battle-panel-btn" title="Batalla LIVE">⚔️</button>
+        <button class="icon-toggle-btn" id="toggle-camera-panel-btn" title="Cámara">🎥</button>
+        <button class="icon-toggle-btn" id="toggle-settings-panel-btn" title="Ajustes">⚙️</button>
+        <button id="share-btn" title="Compartir">🔗</button>
+        <button id="logout-game-btn" title="Cerrar sesión">🚪</button>
+      </div>
     </div>
 
-    <div id="camera-panel" class="hidden">
+    <div id="on-camera-strip"></div>
+
+    <!-- ---- Perfil público de un usuario (tocable desde cualquier lado) ---- -->
+    <div id="user-profile-modal" class="hidden">
+      <div id="user-profile-card">
+        <button id="close-user-profile">✕</button>
+        <img id="up-avatar" src="" alt="" />
+        <span id="up-avatar-fallback"></span>
+        <p id="up-name"></p>
+        <p id="up-followers"></p>
+        <div id="up-actions">
+          <button id="up-follow-btn">Seguir</button>
+          <button id="up-message-btn">✉️ Mensaje</button>
+          <button id="up-subscribe-btn">🌟 Suscribirse</button>
+        </div>
+        <p class="settings-label" style="margin-top:14px;">Publicaciones</p>
+        <div id="up-videos-grid"></div>
+      </div>
+    </div>
+
+    <!-- ---- Panel para desafiar a otra transmisión a una Batalla LIVE ---- -->
+    <div id="battle-panel" class="hidden overlay-dropdown">
+      <p class="settings-label">⚔️ Batalla LIVE</p>
+      <p style="font-size:12px;color:#9fc9b8;margin:0 0 8px;">Elegí otra transmisión en vivo y desafiala. Gana quien más regalos reciba antes de que se acabe el tiempo.</p>
+      <label style="font-size:12px;">Duración</label>
+      <div class="mesa-swatches" id="battle-duration-row">
+        <button class="cam-filter-swatch active" data-seconds="60">1 min</button>
+        <button class="cam-filter-swatch" data-seconds="120">2 min</button>
+        <button class="cam-filter-swatch" data-seconds="180">3 min</button>
+        <button class="cam-filter-swatch" data-seconds="300">5 min</button>
+      </div>
+      <div id="battle-target-list"></div>
+    </div>
+
+    <!-- ---- Invitación entrante a batalla ---- -->
+    <div id="battle-invite-modal" class="end-picker hidden">
+      <div class="card">
+        <h3>⚔️ ¡Te desafiaron a una batalla!</h3>
+        <p id="battle-invite-text" style="font-size:14px;"></p>
+        <button id="battle-invite-accept-btn">✅ Aceptar</button>
+        <button id="battle-invite-decline-btn" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">❌ Rechazar</button>
+      </div>
+    </div>
+
+    <!-- ---- Barra de puntaje mientras hay una batalla activa ---- -->
+    <div id="battle-bar" class="hidden">
+      <div id="battle-bar-names">
+        <span id="battle-my-name"></span>
+        <span id="battle-timer">0:00</span>
+        <span id="battle-opponent-name"></span>
+      </div>
+      <div id="battle-bar-track">
+        <div id="battle-bar-fill-me"></div>
+        <div id="battle-bar-fill-opponent"></div>
+      </div>
+      <div id="battle-bar-scores">
+        <div class="battle-score-block" id="battle-my-block">
+          <span class="battle-score-num" id="battle-my-score">0</span>
+          <span class="battle-score-diamonds">💎 mío</span>
+          <span class="battle-top-gifter hidden" id="battle-my-top-gifter"></span>
+          <span class="battle-leading-tag hidden" id="battle-my-leading-tag">🏆 Ganando</span>
+        </div>
+        <div class="battle-score-block" id="battle-opponent-block">
+          <span class="battle-score-num" id="battle-opponent-score">0</span>
+          <span class="battle-score-diamonds">💎 rival</span>
+          <span class="battle-top-gifter hidden" id="battle-opponent-top-gifter"></span>
+          <span class="battle-leading-tag hidden" id="battle-opponent-leading-tag">🏆 Ganando</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Resultado final de la batalla ---- -->
+    <div id="battle-result-overlay" class="hidden">
+      <p id="battle-result-text"></p>
+    </div>
+
+    <div id="wallet-bar">
+      <button id="wallet-pill">🪙 <span id="wallet-coins">0</span> · 💎 <span id="wallet-diamonds">0</span></button>
+      <div id="wallet-actions" class="hidden overlay-dropdown">
+        <button id="buy-gems-btn" data-i18n="btn_buy_gems">🪙 Comprar monedas</button>
+        <button id="withdraw-btn" data-i18n="btn_withdraw">💎 Retirar diamantes</button>
+      </div>
+    </div>
+
+    <div id="live-search-panel" class="hidden overlay-dropdown">
+      <p class="settings-label">Buscar jugadores</p>
+      <input id="live-search-input" type="text" placeholder="Escribí un nombre..." />
+      <div id="live-search-results"></div>
+    </div>
+
+    <div id="camera-panel" class="hidden overlay-dropdown">
+      <p class="settings-label">Tu micrófono y cámara</p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+        <button id="jitsi-mic-btn" style="width:100%;">🔇 Prender mi micrófono</button>
+        <button id="jitsi-cam-btn" style="width:100%;">📷 Prender mi cámara</button>
+      </div>
+
+      <p class="settings-label">Filtro de cámara (solo lo ves vos)</p>
+      <div class="mesa-swatches" id="cam-filter-row">
+        <button class="cam-filter-swatch active" data-filter="natural">✨ Natural</button>
+        <button class="cam-filter-swatch" data-filter="warm">🌇 Cálido</button>
+        <button class="cam-filter-swatch" data-filter="golden">🌅 Golden Hour</button>
+        <button class="cam-filter-swatch" data-filter="vintage">📻 Vintage</button>
+        <button class="cam-filter-swatch" data-filter="cinematic">🎬 Cinematic</button>
+        <button class="cam-filter-swatch" data-filter="vivid">🌈 Vivid</button>
+        <button class="cam-filter-swatch" data-filter="cool">❄️ Cool</button>
+        <button class="cam-filter-swatch" data-filter="bw">⚫ Black &amp; White</button>
+        <button class="cam-filter-swatch" data-filter="softglow">💫 Soft Glow</button>
+        <button class="cam-filter-swatch" data-filter="retro">📼 Retro</button>
+      </div>
+
+      <p class="settings-label">Fondo virtual (sin pantalla verde, se procesa en tu celular/compu)</p>
+      <div class="vbg-row" id="vbg-row-own">
+        <button class="vbg-swatch active" data-vbg="none" data-vbg-ctx="own" style="background:#0f2b23;">Sin fondo</button>
+        <button class="vbg-swatch" data-vbg="blur" data-vbg-ctx="own" style="background:#0f2b23;">🌫️ Difuminar</button>
+        <button class="vbg-swatch" data-vbg="studio-verde" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/studio-verde.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="casino-night" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/casino-night.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="atardecer" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/atardecer.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="oficina-azul" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/oficina-azul.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="bokeh-dorado" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/bokeh-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="restaurante-dorado" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/restaurante-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="skyline-verde" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/skyline-verde.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="mundo-dorado" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/mundo-dorado.jpg');"></button>
+        <button class="vbg-swatch" data-vbg="red-mundial" data-vbg-ctx="own" style="background:linear-gradient(160deg,#010403 0%,#0b3d2e 55%,#010403 100%);color:#d4a333;font-size:9px;">🌐 Animado</button>
+      </div>
+      <p id="vbg-msg-own" style="font-size:11px;color:#9fc9b8;"></p>
+
+      <p class="settings-label" id="host-guests-toggle-label">Ventanillas abiertas (solo el anfitrión puede prenderlas)</p>
+      <button id="toggle-guests-open-btn" class="hidden" style="width:100%;margin-bottom:10px;">🔒 Abrir para invitados</button>
+
+      <p class="settings-label">Invitar a alguien a subir al live</p>
       <div id="camera-guests-bar">
         <span id="camera-guests-count"></span>
-        <button id="request-camera-btn">🎥 Pedir subir a cámara</button>
+        <button id="request-camera-btn-on">🎥 TableUp con cámara</button>
+        <button id="request-camera-btn-off">🎙️ TableUp sin cámara</button>
         <button id="make-admin-btn">👑 Hacer admin de live</button>
       </div>
       <div id="camera-requests-panel" class="hidden"></div>
     </div>
 
-    <div id="settings-panel" class="hidden">
+    <div id="settings-panel" class="hidden overlay-dropdown">
+      <p class="settings-label">Video en vivo</p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:2px;">
+        <button id="connect-video-btn" style="width:100%;">🔌 Reconectar video</button>
+        <button id="leave-video-btn" style="width:100%;background:#0f2b23;color:#ff8a80;border:1px solid #7a2020;">🚪 Salir del video</button>
+        <button id="live-record-btn" style="width:100%;">⏺️ Grabar mi cámara</button>
+      </div>
+      <p style="font-size:11px;color:#9fc9b8;margin:2px 0 8px;">El audio se conecta solo apenas entrás, para que siempre puedas escuchar. Usá "Reconectar" solo si no escuchás nada. Las grabaciones se guardan 5 días en tu Perfil.</p>
       <p class="settings-label">Tapete de la mesa</p>
       <div class="mesa-swatches">
         <button class="mesa-swatch active" data-felt="green" title="Tapete verde"></button>
@@ -228,35 +736,34 @@
         <button class="style-swatch active" data-style="numbers">🔢 Números</button>
         <button class="style-swatch" data-style="dots">⚫ Puntos</button>
       </div>
+      <p class="settings-label">Ayuda</p>
+      <button id="rail-help-btn" style="width:100%;">❓ Cómo se juega al dominó</button>
     </div>
 
-    <div id="wallet-bar">
-      <span>💎 <span id="wallet-balance">0</span> gemas</span>
-      <button id="buy-gems-btn" data-i18n="btn_buy_gems">Comprar gemas</button>
-      <button id="withdraw-btn" data-i18n="btn_withdraw">Retirar</button>
-    </div>
-
-    <div id="top-info">
-      <span id="room-label"></span>
-      <span id="turn-label"></span>
-      <span id="spectator-count"></span>
-      <button id="share-btn" title="Compartir">🔗 Compartir</button>
-      <button id="logout-game-btn" title="Cerrar sesión">🚪 Salir</button>
-    </div>
-
-    <div id="tiktok-rail">
-      <button class="rail-btn" id="rail-like-btn">❤️<span id="rail-like-count">0</span></button>
-      <button class="rail-btn" id="rail-gift-btn">🎁</button>
-      <button class="rail-btn" id="rail-chat-btn">💬</button>
-      <button class="rail-btn" id="rail-share-btn">🔗</button>
-      <button class="rail-btn emoji-btn" data-emoji="😂">😂</button>
-      <button class="rail-btn emoji-btn" data-emoji="😢">😢</button>
-      <button class="rail-btn emoji-btn" data-emoji="😮">😮</button>
-      <button class="rail-btn emoji-btn" data-emoji="👏">👏</button>
-      <button class="rail-btn" id="rail-help-btn">❓</button>
+    <div id="live-nav">
+      <button id="live-nav-up" title="Otra transmisión">▲</button>
+      <button id="live-nav-down" title="Otra transmisión">▼</button>
     </div>
 
     <div id="reaction-layer"></div>
+
+    <div id="live-chat">
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Escribí un comentario..." data-i18n-placeholder="comment_placeholder" maxlength="200" />
+        <button id="chat-send-btn" data-i18n="btn_send">Enviar</button>
+        <button class="rail-btn-h" id="rail-chat-btn">💬</button>
+        <button class="rail-btn-h" id="rail-emoji-btn">😊</button>
+        <button class="rail-btn-h" id="rail-share-btn">🔗</button>
+        <button class="rail-btn-h" id="rail-gift-btn">🎁</button>
+        <button class="rail-btn-h" id="rail-like-btn">❤️<span id="rail-like-count">0</span></button>
+      </div>
+    </div>
+
+    <div id="play-toggle-row">
+      <button id="request-seat-btn" class="hidden">✋ Sumarme a la mesa</button>
+      <button id="toggle-domino-btn">🎲 Jugar dominó</button>
+    </div>
 
     <div id="domino-game-panel" class="hidden">
       <div id="turn-order"></div>
@@ -270,6 +777,7 @@
         </div>
         <div id="table-mesa">
           <div id="mesa-logo">TableLive</div>
+          <p id="table-waiting-msg" class="hidden"></p>
           <div id="board-inner"></div>
         </div>
       </div>
@@ -293,19 +801,11 @@
         </div>
       </div>
     </div>
-
-    <div id="live-chat">
-      <div id="chat-messages"></div>
-      <div id="chat-input-row">
-        <input id="chat-input" type="text" placeholder="Escribí un comentario..." data-i18n-placeholder="comment_placeholder" maxlength="200" />
-        <button id="chat-send-btn" data-i18n="btn_send">Enviar</button>
-      </div>
-    </div>
   </div>
 
   <div id="buy-modal" class="end-picker hidden">
     <div class="card" style="max-height:80vh;overflow-y:auto;">
-      <h3>Comprar gemas</h3>
+      <h3>🪙 Comprar monedas</h3>
       <p id="paypal-warning" class="hidden">La tienda todavía no está configurada con PayPal.</p>
       <div id="pack-grid"></div>
       <button id="close-buy-modal">Cerrar</button>
@@ -314,13 +814,23 @@
 
   <div id="withdraw-modal" class="end-picker hidden">
     <div class="card">
-      <h3>Retirar gemas</h3>
-      <p style="font-size:13px;color:#cfe3da;">100 gemas ≈ USD $1.00. Se descuenta una comisión de plataforma del 25%; recibís el 75% en tu PayPal registrado.</p>
-      <label>Cantidad de gemas a retirar</label>
+      <h3>💎 Retirar diamantes</h3>
+      <p style="font-size:13px;color:#cfe3da;">100 diamantes ≈ USD $1.00. Se descuenta una comisión de plataforma del 25%; recibís el 75% en tu PayPal registrado. (Las Monedas 🪙 no se pueden retirar — solo se usan para mandar regalos, suscribirte o comprar en la tienda.)</p>
+      <label>Cantidad de diamantes a retirar</label>
       <input id="withdraw-amount" type="text" placeholder="Ej: 500" />
       <button id="submit-withdraw">Pedir retiro</button>
       <button id="close-withdraw-modal">Cerrar</button>
       <p id="withdraw-msg"></p>
+    </div>
+  </div>
+
+  <div id="subscribe-modal" class="end-picker hidden">
+    <div class="card">
+      <h3>🌟 Suscribirte a <span id="subscribe-target-name"></span></h3>
+      <p style="font-size:12px;color:#9fc9b8;">Apoyo mensual con monedas 🪙. Se renueva solo cada 30 días mientras te alcancen las monedas — podés cancelar cuando quieras.</p>
+      <div id="subscribe-tiers"></div>
+      <p id="subscribe-msg" style="font-size:13px;"></p>
+      <button id="close-subscribe-modal" style="background:#0f2b23;color:#fff;border:1px solid #2f6b58;">Cerrar</button>
     </div>
   </div>
 
@@ -332,7 +842,6 @@
       <div id="private-chat-messages" style="max-height:180px;overflow-y:auto;margin-bottom:8px;"></div>
       <input id="private-chat-input" type="text" placeholder="Escribí en privado..." />
       <button id="private-chat-send">Enviar</button>
-      <button id="private-chat-voice">🔒 Abrir sala de voz privada</button>
       <button id="close-private-chat">Cerrar</button>
     </div>
   </div>
@@ -357,7 +866,6 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://meet.jit.si/external_api.js"></script>
   <script src="i18n.js"></script>
   <script src="countries.js"></script>
   <script src="client.js"></script>

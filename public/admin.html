@@ -15,22 +15,59 @@
   .badge-pagado { color: #7fd99a; font-weight: 600; }
   .mini-btn { width: auto; padding: 5px 10px; font-size: 12px; margin: 0; }
   .empty-msg { color: #9fc9b8; font-size: 13px; }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: #1c473c; border: 1px solid #2f6b58; border-radius: 10px; padding: 12px; text-align: center; }
+  .stat-card .num { font-size: 20px; font-weight: 700; color: #e0a63e; }
+  .stat-card .label { font-size: 11px; color: #cfe3da; margin-top: 2px; }
+  .badge-banned { color: #ff8a80; font-weight: 600; }
+  .badge-active { color: #7fd99a; }
+  .user-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  .user-actions input { width: 70px; margin: 0; padding: 4px; font-size: 11px; display: inline-block; }
 </style>
 </head>
 <body>
 
   <div id="admin-login" class="screen">
+    <img src="/icons/icon-192.png" alt="TableLive" style="width:80px;display:block;margin:0 auto 12px;" />
     <h1>Panel de administrador</h1>
     <div class="card">
-      <label>Contraseña de administrador</label>
-      <input id="admin-password" type="password" placeholder="Contraseña" />
-      <button id="admin-login-btn">Entrar</button>
+      <div class="tabs">
+        <button id="tab-admin-login" class="tab-btn selected">Contraseña maestra</button>
+        <button id="tab-staff-login" class="tab-btn">Tu cuenta de TableLive</button>
+      </div>
+
+      <div id="admin-login-form">
+        <label>Contraseña de administrador</label>
+        <input id="admin-password" type="password" placeholder="Contraseña" />
+        <button id="admin-login-btn">Entrar</button>
+      </div>
+
+      <div id="staff-login-form" class="hidden">
+        <label>Email</label>
+        <input id="staff-email" type="text" placeholder="tu-email@ejemplo.com" />
+        <label>Contraseña</label>
+        <input id="staff-password" type="password" placeholder="Tu contraseña de TableLive" />
+        <button id="staff-login-btn">Entrar</button>
+      </div>
       <p id="admin-login-error" style="color:#ff8a80;font-size:13px;text-align:center;"></p>
     </div>
   </div>
 
   <div id="admin-panel" class="admin-wrap hidden">
-    <h1>Panel de administrador — Dominó Online</h1>
+    <div style="text-align:center;margin-bottom:10px;">
+      <img src="/icons/icon-192.png" alt="TableLive" style="width:56px;" />
+    </div>
+    <h1>Panel de administrador — TableLive</h1>
+
+    <h2 class="section-title">📊 Estadísticas generales</h2>
+    <div id="stats-grid" class="stats-grid"></div>
+
+    <h2 class="section-title">📢 Anuncio a toda la plataforma</h2>
+    <div class="card">
+      <input id="announce-text" type="text" placeholder="Escribí un mensaje para todos los usuarios conectados..." maxlength="300" />
+      <button id="announce-btn" class="mini-btn master-admin-only">Enviar anuncio</button>
+      <p id="announce-msg" style="font-size:12px;color:#8fd4a8;"></p>
+    </div>
 
     <h2 class="section-title">Solicitudes de monetización</h2>
     <table id="monetization-table">
@@ -40,19 +77,67 @@
 
     <h2 class="section-title">Pedidos de retiro</h2>
     <table id="withdrawals-table">
-      <thead><tr><th>Fecha</th><th>Jugador</th><th>PayPal</th><th>Gemas</th><th>Le corresponde</th><th>Tu comisión</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Jugador</th><th>PayPal</th><th>Diamantes</th><th>Le corresponde</th><th>Tu comisión</th><th>Estado</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
 
+    <h2 class="section-title">Suscripciones activas</h2>
+    <table id="subscriptions-table">
+      <thead><tr><th>Suscriptor</th><th>Creador</th><th>Nivel</th><th>Vence</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title">🚩 Denuncias</h2>
+    <table id="reports-table">
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Motivo</th><th>Detalles</th><th>Quién denunció</th><th>Estado</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title">Publicaciones</h2>
+    <table id="posts-table">
+      <thead><tr><th>Fecha</th><th>Autor</th><th>Tipo</th><th>Descripción</th><th>Likes</th><th>Comentarios</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 class="section-title master-admin-only">👥 Personal con acceso al panel (secretaria/supervisor/etc)</h2>
+    <table id="staff-table" class="master-admin-only">
+      <thead><tr><th>Nombre</th><th>Email</th><th>Puesto</th><th>Nivel de acceso</th><th>Acciones</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="master-admin-only" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+      <input id="new-staff-email" placeholder="Email del usuario ya registrado" style="width:220px;" />
+      <input id="new-staff-role-name" placeholder="Puesto (ej: Secretaria, Supervisor)" style="width:200px;" />
+      <select id="new-staff-access-level" style="width:180px;">
+        <option value="limitado">Limitado (solo ver / moderar)</option>
+        <option value="parcial">Parcial (día a día)</option>
+        <option value="full">Full (todo menos lo más sensible)</option>
+      </select>
+      <button id="assign-staff-btn" style="width:auto;">➕ Asignar puesto</button>
+    </div>
+    <p style="font-size:11px;color:#9fc9b8;margin-top:6px;" class="master-admin-only">La persona entra al panel con su propio email y contraseña (pestaña "Personal"), no con la contraseña maestra. El nivel "full" no puede manejar precios, borrar cuentas, ni asignar a otro personal — eso queda solo para vos.</p>
+
+    <h2 class="section-title">💰 Precios de los planes de reunión</h2>
+    <table id="meeting-plans-table">
+      <thead><tr><th>Tipo</th><th>Nombre</th><th>Precio (monedas 🪙)</th><th>Duración (horas)</th><th>Acciones</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+      <input id="new-plan-type" placeholder="tipo (ej: hourly)" style="width:130px;" />
+      <input id="new-plan-label" placeholder="Nombre (ej: Por hora)" style="width:150px;" />
+      <input id="new-plan-price" type="number" placeholder="Precio en monedas" style="width:140px;" />
+      <input id="new-plan-hours" type="number" placeholder="Duración en horas" style="width:140px;" />
+      <button id="add-meeting-plan-btn" style="width:auto;" class="master-admin-only">➕ Agregar plan</button>
+    </div>
+
     <h2 class="section-title">Usuarios registrados</h2>
     <table id="users-table">
-      <thead><tr><th>Nombre</th><th>Email</th><th>PayPal</th><th>Gemas actuales</th><th>Seguidores</th><th>Monetización</th><th>Registrado</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Email</th><th>PayPal</th><th>Monedas</th><th>Diamantes</th><th>Seguidores</th><th>Estado</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table>
 
     <h2 class="section-title">Salas activas ahora</h2>
     <table id="rooms-table">
-      <thead><tr><th>Código</th><th>Capacidad</th><th>Jugadores</th><th>Espectadores</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Código</th><th>Capacidad</th><th>Jugadores</th><th>Espectadores</th><th>Estado</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
 

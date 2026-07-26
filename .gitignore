@@ -1,2 +1,23 @@
 uploads_privados/
 node_modules/
+.env
+.jwt_secret
+
+# Contenido que suben los usuarios en runtime (avatares, videos/fotos de posts):
+# son archivos pesados y específicos de cada servidor, no van en el repositorio de código.
+public/avatars/
+public/uploads/
+
+# Datos generados en runtime: tienen info sensible de usuarios (email, telefono,
+# datos bancarios, mensajes privados) y no deben subirse al repo.
+users.json
+withdrawals.json
+monetization_requests.json
+posts.json
+dm_messages.json
+subscriptions.json
+gifts.json
+reports.json
+recordings.json
+meeting_plans.json
+scheduled_meetings.json
