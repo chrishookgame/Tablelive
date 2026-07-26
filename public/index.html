@@ -21,6 +21,10 @@
 </head>
 <body>
 
+  <div id="splash-screen">
+    <img src="/splash-presentacion.jpg" alt="TableLive" id="splash-img" />
+  </div>
+
   <div id="auth" class="screen">
     <div style="text-align:center;margin-bottom:10px;">
       <select id="lang-select" style="width:auto;display:inline-block;">
@@ -127,8 +131,7 @@
 
   <div id="lobby" class="screen hidden">
     <div id="feed-header">
-      <img src="/icons/icon-192.png" alt="" id="feed-header-logo" />
-      <span id="feed-header-title">TableLive</span>
+      <img src="/splash-presentacion.jpg" alt="TableLive" id="feed-header-banner" />
       <p id="lobby-name-label"></p>
     </div>
 
@@ -199,6 +202,17 @@
         <p id="profile-save-msg" style="font-size:12px;color:#cfe3da;"></p>
 
         <p id="profile-followers" style="font-size:13px;color:#cfe3da;margin-top:10px;text-align:center;"></p>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>✉️ Contactar a soporte</h3>
+        <p style="font-size:12px;color:#cfe3da;margin-bottom:10px;">Tu mensaje le llega directo al panel de administración.</p>
+        <label>Asunto</label>
+        <input id="support-subject" type="text" placeholder="Ej: Problema con un pago" maxlength="100" />
+        <label>Mensaje</label>
+        <textarea id="support-message" rows="4" maxlength="3000" placeholder="Contanos qué pasó..." style="width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid #2f6b58;background:#0f2b23;color:#fff;font-family:inherit;resize:vertical;"></textarea>
+        <button id="send-support-btn" style="margin-top:8px;">Enviar mensaje</button>
+        <p id="support-msg" style="font-size:12px;color:#8fd4a8;"></p>
       </div>
 
       <div class="card hidden" id="admin-access-card" style="margin-top:16px;">
@@ -511,6 +525,7 @@
         <button class="vbg-swatch" data-vbg="skyline-verde" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/skyline-verde.jpg');"></button>
         <button class="vbg-swatch" data-vbg="mundo-dorado" data-vbg-ctx="meeting" style="background-image:url('/virtual-backgrounds/mundo-dorado.jpg');"></button>
         <button class="vbg-swatch" data-vbg="red-mundial" data-vbg-ctx="meeting" style="background:linear-gradient(160deg,#010403 0%,#0b3d2e 55%,#010403 100%);color:#d4a333;font-size:9px;">🌐 Animado</button>
+        <button class="vbg-swatch" data-vbg="presentacion" data-vbg-ctx="meeting" style="background-image:url('/splash-presentacion.jpg');"></button>
       </div>
       <p id="vbg-msg-meeting" style="font-size:11px;color:#9fc9b8;"></p>
     </div>
@@ -700,6 +715,7 @@
         <button class="vbg-swatch" data-vbg="skyline-verde" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/skyline-verde.jpg');"></button>
         <button class="vbg-swatch" data-vbg="mundo-dorado" data-vbg-ctx="own" style="background-image:url('/virtual-backgrounds/mundo-dorado.jpg');"></button>
         <button class="vbg-swatch" data-vbg="red-mundial" data-vbg-ctx="own" style="background:linear-gradient(160deg,#010403 0%,#0b3d2e 55%,#010403 100%);color:#d4a333;font-size:9px;">🌐 Animado</button>
+        <button class="vbg-swatch" data-vbg="presentacion" data-vbg-ctx="own" style="background-image:url('/splash-presentacion.jpg');"></button>
       </div>
       <p id="vbg-msg-own" style="font-size:11px;color:#9fc9b8;"></p>
 

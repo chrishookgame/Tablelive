@@ -123,6 +123,7 @@ function loadEverything() {
   loadAdminPosts();
   loadAdminSubscriptions();
   loadAdminReports();
+  loadSupportMessages();
 }
 
 async function loadOverview() {
@@ -142,6 +143,7 @@ async function loadOverview() {
 // después de cada carga porque las tablas se vuelven a armar con innerHTML cada vez.
 function applyAccessLevelVisibility() {
   document.querySelectorAll(".master-admin-only").forEach((el) => el.classList.toggle("hidden", !isMasterAdmin));
+  document.querySelectorAll(".needs-full").forEach((el) => el.classList.toggle("hidden", myAccessLevel !== "full"));
   document.querySelectorAll(".needs-parcial").forEach((el) => el.classList.toggle("hidden", myAccessLevel === "limitado"));
 }
 
@@ -326,15 +328,17 @@ function renderUsers(list) {
       <td>🪙 ${u.coinBalance}</td>
       <td>💎 ${u.diamondBalance}</td>
       <td>${u.followerCount}</td>
-      <td class="${u.banned ? 'badge-banned' : 'badge-active'}">${u.banned ? "Baneado" : "Activo"}</td>
+      <td class="${u.blocked ? 'badge-banned' : u.suspended ? 'badge-banned' : u.banned ? 'badge-banned' : 'badge-active'}">${u.blocked ? "Bloqueado" : u.suspended ? "Suspendido" : u.banned ? "Baneado" : "Activo"}</td>
       <td class="user-actions">
         <input type="number" placeholder="🪙" id="coin-${cssSafe(u.email)}" class="master-admin-only" />
         <input type="number" placeholder="💎" id="diamond-${cssSafe(u.email)}" class="master-admin-only" />
         <button class="mini-btn master-admin-only" onclick="adjustBalance('${escapeHtml(u.email)}')">Fijar</button>
         <button class="mini-btn needs-parcial" onclick="toggleBan('${escapeHtml(u.email)}', ${!u.banned})">${u.banned ? "Desbanear" : "Banear"}</button>
+        <button class="mini-btn needs-full" onclick="toggleSuspend('${escapeHtml(u.email)}', ${!u.suspended})" style="background:#8a6d1a;color:#fff;">${u.suspended ? "Reactivar" : "Suspender"}</button>
+        <button class="mini-btn needs-full" onclick="toggleBlock('${escapeHtml(u.email)}', ${!u.blocked})" style="background:#943838;color:#fff;">${u.blocked ? "Desbloquear" : "Bloquear"}</button>
         <button class="mini-btn needs-parcial" onclick="verifyEmailAdmin('${escapeHtml(u.email)}')">Verificar email</button>
         <button class="mini-btn master-admin-only" onclick="toggleOwner('${escapeHtml(u.email)}', ${!u.isPlatformOwner})">${u.isPlatformOwner ? "★ Quitar dueño" : "☆ Hacer dueño (reuniones sin límite)"}</button>
-        <button class="mini-btn master-admin-only" onclick="deleteUserAdmin('${escapeHtml(u.email)}')" style="background:#7a2020;color:#fff;">Borrar cuenta</button>
+        <button class="mini-btn needs-full" onclick="deleteUserAdmin('${escapeHtml(u.email)}')" style="background:#7a2020;color:#fff;">Borrar cuenta</button>
       </td>
     </tr>
   `).join("");
@@ -359,6 +363,20 @@ async function adjustBalance(email) {
 async function toggleBan(email, banned) {
   if (banned && !confirm("¿Seguro que querés banear a " + email + "? No va a poder iniciar sesión.")) return;
   await adminFetch("/api/admin/user/ban", { method: "POST", body: JSON.stringify({ email, banned }) });
+  loadOverview();
+}
+
+// Suspender: pensado para algo temporal, fácil de revertir (ej: mientras se revisa una denuncia)
+async function toggleSuspend(email, suspended) {
+  if (suspended && !confirm("¿Suspender temporalmente a " + email + "? No va a poder iniciar sesión hasta que lo reactives.")) return;
+  await adminFetch("/api/admin/user/suspend", { method: "POST", body: JSON.stringify({ email, suspended }) });
+  loadOverview();
+}
+
+// Bloquear: más definitivo que suspender, para casos graves
+async function toggleBlock(email, blocked) {
+  if (blocked && !confirm("¿Bloquear a " + email + "? Es más definitivo que suspender, pensalo para casos graves.")) return;
+  await adminFetch("/api/admin/user/block", { method: "POST", body: JSON.stringify({ email, blocked }) });
   loadOverview();
 }
 
@@ -469,6 +487,34 @@ async function payAutomatic(index) {
   if (!res.ok) { alert("No se pudo pagar: " + data.error); return; }
   alert("¡Listo! PayPal aceptó el pago (lote " + data.batchId + ").");
   loadOverview();
+}
+
+async function loadSupportMessages() {
+  const res = await adminFetch("/api/admin/support");
+  if (!res) return;
+  const data = await res.json();
+  const tbody = document.querySelector("#support-table tbody");
+  if (!data.messages.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No hay mensajes de soporte todavía.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.messages.map((m) => `
+    <tr>
+      <td>${fmtDate(m.createdAt)}</td>
+      <td>${escapeHtml(m.name)}<br><span style="font-size:11px;color:#9fc9b8;">${escapeHtml(m.email)}</span></td>
+      <td>${escapeHtml(m.subject)}</td>
+      <td style="max-width:320px;white-space:pre-wrap;">${escapeHtml(m.message)}</td>
+      <td class="badge-${m.status === 'resuelto' ? 'pagado' : 'pendiente'}">${m.status}</td>
+      <td>
+        <button class="mini-btn" onclick="resolveSupport('${m.id}','${m.status === 'resuelto' ? 'abierto' : 'resuelto'}')">${m.status === 'resuelto' ? 'Reabrir' : 'Marcar resuelto'}</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+async function resolveSupport(id, status) {
+  await adminFetch("/api/admin/support/resolve", { method: "POST", body: JSON.stringify({ id, status }) });
+  loadSupportMessages();
 }
 
 async function loadAdminReports() {

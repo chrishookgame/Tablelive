@@ -222,6 +222,14 @@ const GIFTS_FILE = path.join(__dirname, "gifts.json");
 const REPORTS_FILE = path.join(__dirname, "reports.json");
 const RECORDINGS_META_FILE = path.join(__dirname, "recordings.json");
 const SCHEDULED_MEETINGS_FILE = path.join(__dirname, "scheduled_meetings.json");
+const SUPPORT_MESSAGES_FILE = path.join(__dirname, "support_messages.json");
+
+function loadSupportMessages() {
+  try { return JSON.parse(fs.readFileSync(SUPPORT_MESSAGES_FILE, "utf8")); } catch (e) { return []; }
+}
+function saveSupportMessages(list) {
+  fs.writeFileSync(SUPPORT_MESSAGES_FILE, JSON.stringify(list, null, 2));
+}
 
 function loadUsers() {
   let data;
@@ -303,6 +311,8 @@ function authMiddleware(req, res, next) {
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   const user = token ? verifyToken(token) : null;
   if (!user) return res.status(401).json({ error: "Tenés que iniciar sesión." });
+  if (user.blocked) return res.status(403).json({ error: "Esta cuenta fue bloqueada por un administrador." });
+  if (user.suspended) return res.status(403).json({ error: "Esta cuenta está suspendida temporalmente por un administrador." });
   if (user.banned) return res.status(403).json({ error: "Esta cuenta fue suspendida por un administrador." });
   req.user = user;
   next();
@@ -403,6 +413,8 @@ app.post("/api/login", async (req, res) => {
   if (!user) return res.status(400).json({ error: "No existe una cuenta con ese email." });
   const ok = await bcrypt.compare(password || "", user.passwordHash);
   if (!ok) return res.status(400).json({ error: "Contraseña incorrecta." });
+  if (user.blocked) return res.status(403).json({ error: "Esta cuenta fue bloqueada por un administrador." });
+  if (user.suspended) return res.status(403).json({ error: "Esta cuenta está suspendida temporalmente por un administrador." });
   if (user.banned) return res.status(403).json({ error: "Esta cuenta fue suspendida por un administrador." });
   res.json({ token: makeToken(key), name: user.name, coinBalance: user.coinBalance, diamondBalance: user.diamondBalance, avatarUrl: user.avatarUrl || "", emailVerified: !!user.emailVerified, language: user.language || "es" });
 });
@@ -1460,7 +1472,7 @@ app.get("/api/admin/overview", adminOrStaff("limitado"), (req, res) => {
   const userList = Object.values(users).map((u) => ({
     name: u.name, email: u.email, paypalEmail: u.paypalEmail, coinBalance: u.coinBalance, diamondBalance: u.diamondBalance, createdAt: u.createdAt,
     followerCount: getFollowerCount(u.email), monetizationStatus: u.monetization ? u.monetization.status : "no_solicitado",
-    banned: !!u.banned, isPlatformOwner: !!u.isPlatformOwner,
+    banned: !!u.banned, isPlatformOwner: !!u.isPlatformOwner, suspended: !!u.suspended, blocked: !!u.blocked,
   }));
 
   const roomList = Object.values(rooms).map((r) => ({
@@ -1573,6 +1585,26 @@ app.post("/api/admin/user/ban", adminOrStaff("parcial"), (req, res) => {
   res.json({ ok: true, banned: user.banned });
 });
 
+// Suspender: pensado como algo temporal y fácil de revertir (ej: mientras se revisa una denuncia)
+app.post("/api/admin/user/suspend", adminOrStaff("full"), (req, res) => {
+  const { email, suspended } = req.body;
+  const user = users[emailKey(email)];
+  if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+  user.suspended = !!suspended;
+  saveUsers(users);
+  res.json({ ok: true, suspended: user.suspended });
+});
+
+// Bloquear: más definitivo que suspender, para casos graves
+app.post("/api/admin/user/block", adminOrStaff("full"), (req, res) => {
+  const { email, blocked } = req.body;
+  const user = users[emailKey(email)];
+  if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+  user.blocked = !!blocked;
+  saveUsers(users);
+  res.json({ ok: true, blocked: user.blocked });
+});
+
 app.post("/api/admin/user/set-owner", adminAuthMiddleware, (req, res) => {
   const { email, isPlatformOwner } = req.body;
   const user = users[emailKey(email)];
@@ -1590,7 +1622,7 @@ app.post("/api/admin/user/verify-email", adminOrStaff("parcial"), (req, res) => 
   res.json({ ok: true });
 });
 
-app.post("/api/admin/user/delete", adminAuthMiddleware, (req, res) => {
+app.post("/api/admin/user/delete", adminOrStaff("full"), (req, res) => {
   const key = emailKey(req.body.email);
   if (!users[key]) return res.status(404).json({ error: "Usuario no encontrado." });
   delete users[key];
@@ -1667,6 +1699,42 @@ app.post("/api/admin/reports/resolve", adminOrStaff("limitado"), (req, res) => {
   r.status = req.body.status === "descartada" ? "descartada" : "resuelta";
   r.resolvedAt = new Date().toISOString();
   saveReports(reports);
+  res.json({ ok: true });
+});
+
+// ---------------- Mensajes de soporte: le llegan directo al panel de admin ----------------
+
+app.post("/api/support/send", authMiddleware, (req, res) => {
+  const { subject, message } = req.body;
+  const cleanMessage = (message || "").trim();
+  if (!cleanMessage) return res.status(400).json({ error: "Escribí tu mensaje antes de enviarlo." });
+  const messages = loadSupportMessages();
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    email: req.user.email,
+    name: req.user.name,
+    subject: (subject || "Consulta general").trim().slice(0, 100),
+    message: cleanMessage.slice(0, 3000),
+    createdAt: new Date().toISOString(),
+    status: "abierto", // abierto | resuelto
+  };
+  messages.push(entry);
+  saveSupportMessages(messages);
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/support", adminOrStaff("limitado"), (req, res) => {
+  const messages = loadSupportMessages().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  res.json({ messages });
+});
+
+app.post("/api/admin/support/resolve", adminOrStaff("parcial"), (req, res) => {
+  const messages = loadSupportMessages();
+  const m = messages.find((x) => x.id === req.body.id);
+  if (!m) return res.status(404).json({ error: "No encontrado." });
+  m.status = req.body.status === "abierto" ? "abierto" : "resuelto";
+  m.resolvedAt = new Date().toISOString();
+  saveSupportMessages(messages);
   res.json({ ok: true });
 });
 

@@ -960,11 +960,17 @@ body { overflow-x: hidden; }
 #feed-header {
   max-width: 900px;
   margin: 0 auto;
-  padding: 16px 4px 6px;
+  padding: 0 0 6px;
   text-align: center;
 }
-#feed-header-title { font-size: 22px; font-weight: 700; color: #e0a63e; letter-spacing: 0.5px; }
-#lobby-name-label { font-size: 12px; color: #9fc9b8; margin: 4px 0 0; }
+#feed-header-banner {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+  border-radius: 0 0 16px 16px;
+}
+#lobby-name-label { font-size: 12px; color: #9fc9b8; margin: 8px 0 0; }
 
 .lobby-tab { max-width: 900px; margin: 0 auto; padding: 4px 16px 16px; }
 
@@ -1121,7 +1127,7 @@ body { overflow-x: hidden; }
 
 /* En pantallas más chicas (celulares), un poco más compacto */
 @media (max-width: 420px) {
-  #feed-header-title { font-size: 19px; }
+  #feed-header-banner { max-height: 150px; }
   .feed-card { padding: 14px 12px; }
   .feed-card-players { font-size: 15px; }
   .nav-btn, .nav-plain-btn { min-width: 38px; font-size: 17px; }
@@ -1652,13 +1658,6 @@ body { overflow-x: hidden; }
 #auth-logo-wrap { text-align: center; margin: 6px 0 14px; }
 #auth-logo { width: 150px; max-width: 60vw; height: auto; }
 
-#feed-header-logo {
-  height: 34px;
-  width: auto;
-  display: block;
-  margin: 0 auto 4px;
-}
-
 /* ---------------- Formulario de tarjeta (PayPal Advanced Card Fields) ---------------- */
 .card-fields-wrap { display: flex; flex-direction: column; gap: 8px; }
 .card-field-label { font-size: 11px; color: #9fc9b8; margin: 6px 0 3px; display: block; }
@@ -1943,3 +1942,28 @@ body { overflow-x: hidden; }
   margin: 0;
 }
 .meeting-tile-btn.meeting-tile-kick { background: rgba(122,32,32,0.85); }
+
+/* ---------------- Pantalla de presentación al entrar a la app ---------------- */
+#splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: #010403;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: opacity 0.6s ease;
+}
+#splash-screen.fade-out { opacity: 0; pointer-events: none; }
+#splash-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: splashZoom 3.2s ease-out forwards;
+}
+@keyframes splashZoom {
+  0% { transform: scale(1.06); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}

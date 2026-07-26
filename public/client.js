@@ -1,3 +1,18 @@
+// ---------------- Pantalla de presentación al entrar ----------------
+(function () {
+  const splash = document.getElementById("splash-screen");
+  if (!splash) return;
+  let dismissed = false;
+  function hideSplash() {
+    if (dismissed) return;
+    dismissed = true;
+    splash.classList.add("fade-out");
+    setTimeout(() => splash.remove(), 650);
+  }
+  splash.addEventListener("click", hideSplash); // tocarla la salta
+  setTimeout(hideSplash, 2800);
+})();
+
 let socket = null;
 let authToken = localStorage.getItem("domino_token");
 let myName = localStorage.getItem("domino_display_name") || "";
@@ -42,6 +57,27 @@ function initInstallSection() {
   }
 }
 
+document.getElementById("send-support-btn").addEventListener("click", async () => {
+  const subject = document.getElementById("support-subject").value.trim();
+  const message = document.getElementById("support-message").value.trim();
+  const msgEl = document.getElementById("support-msg");
+  if (!message) { msgEl.style.color = "#ff8a80"; msgEl.textContent = "Escribí tu mensaje antes de enviarlo."; return; }
+  try {
+    const res = await fetch("/api/support/send", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + authToken },
+      body: JSON.stringify({ subject, message }),
+    });
+    const data = await res.json();
+    if (!res.ok) { msgEl.style.color = "#ff8a80"; msgEl.textContent = data.error; return; }
+    msgEl.style.color = "#8fd4a8";
+    msgEl.textContent = "¡Listo! Tu mensaje le llegó al equipo de soporte.";
+    document.getElementById("support-subject").value = "";
+    document.getElementById("support-message").value = "";
+  } catch (e) {
+    msgEl.style.color = "#ff8a80";
+    msgEl.textContent = "Error de conexión.";
+  }
+});
 document.getElementById("go-to-admin-btn").addEventListener("click", () => {
   window.open("/admin.html", "_blank");
 });
@@ -2643,6 +2679,7 @@ const VIRTUAL_BACKGROUNDS = [
   { id: "skyline-verde", type: "image", url: "/virtual-backgrounds/skyline-verde.jpg" },
   { id: "mundo-dorado", type: "image", url: "/virtual-backgrounds/mundo-dorado.jpg" },
   { id: "red-mundial", type: "animated" },
+  { id: "presentacion", type: "image", url: "/splash-presentacion.jpg" },
 ];
 
 let vbgCanvas = null;
@@ -2653,6 +2690,8 @@ let vbgImageEl = null;
 let vbgSegmentation = null;
 let vbgAnimationFrame = null;
 let vbgSourceVideoEl = null;
+let vbgHiddenSourceVideo = null; // <video> propio y oculto, conectado directo a la cámara cruda
+let vbgDisplayVideoEl = null; // el <video> que se ve en pantalla (donde se muestra el resultado)
 let vbgContext = null; // "own" o "meeting"
 let vbgLoadingLib = false;
 
@@ -2789,7 +2828,22 @@ async function applyVirtualBackground(bgId, context) {
   if (!sourceVideo) { if (msgEl) msgEl.textContent = "Prendé tu cámara primero."; return; }
 
   vbgContext = context;
-  vbgSourceVideoEl = sourceVideo;
+  // OJO: usamos un <video> propio y OCULTO conectado directo a tu cámara cruda para
+  // leer los cuadros a procesar. Antes se usaba el mismo <video> que se ve en pantalla,
+  // pero ese termina mostrando el resultado YA procesado — si seguíamos leyendo de ahí,
+  // el fondo virtual terminaba procesando su propia salida en bucle (se iba a negro o
+  // se congelaba). Con un video aparte, cámara cruda y vista en pantalla quedan separadas.
+  if (!vbgHiddenSourceVideo) {
+    vbgHiddenSourceVideo = document.createElement("video");
+    vbgHiddenSourceVideo.autoplay = true;
+    vbgHiddenSourceVideo.playsInline = true;
+    vbgHiddenSourceVideo.muted = true;
+    vbgHiddenSourceVideo.style.display = "none";
+    document.body.appendChild(vbgHiddenSourceVideo);
+  }
+  if (vbgHiddenSourceVideo.srcObject !== stream) vbgHiddenSourceVideo.srcObject = stream;
+  vbgSourceVideoEl = vbgHiddenSourceVideo;
+  vbgDisplayVideoEl = sourceVideo;
 
   if (!vbgCanvas) {
     vbgCanvas = document.createElement("canvas");
@@ -2900,7 +2954,7 @@ function stopVirtualBackground() {
       const sender = pc.getSenders && pc.getSenders().find((s) => s.track && s.track.kind === "video");
       if (sender) sender.replaceTrack(rawTrack);
     });
-    if (vbgSourceVideoEl) vbgSourceVideoEl.srcObject = rawStream;
+    if (vbgDisplayVideoEl) vbgDisplayVideoEl.srcObject = rawStream;
   }
   if (vbgProcessedStream) {
     vbgProcessedStream.getTracks().forEach((t) => t.stop());
