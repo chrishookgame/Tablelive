@@ -258,7 +258,23 @@ function getOrCreateJwtSecret() {
   }
 }
 const JWT_SECRET = getOrCreateJwtSecret();
-const PLATFORM_FEE = 0.25; // 25% para la plataforma, 75% para quien retira
+
+// La comisión de la plataforma sobre cada retiro, ahora configurable desde el panel
+// de admin en vez de quedar fija en el código — arranca en 25% por defecto, pero el
+// admin la puede cambiar cuando quiera.
+const PLATFORM_FEE_FILE = path.join(__dirname, "platform_fee.json");
+function loadPlatformFee() {
+  try {
+    const data = JSON.parse(fs.readFileSync(PLATFORM_FEE_FILE, "utf8"));
+    if (typeof data.fee === "number" && data.fee >= 0 && data.fee <= 1) return data.fee;
+  } catch (e) {}
+  return 0.25; // 25% por defecto, si nunca se configuró nada
+}
+function savePlatformFee(fee) {
+  writeJSONAsync(PLATFORM_FEE_FILE, { fee });
+}
+let PLATFORM_FEE = loadPlatformFee();
+
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "cambiame123";
 // Si este email inicia sesión con SU PROPIA cuenta normal de TableLive (la contraseña
 // que usa para jugar, no una contraseña maestra aparte), entra directo como admin
@@ -692,17 +708,23 @@ app.get("/api/search-players", authMiddleware, (req, res) => {
   const q = (req.query.q || "").trim().toLowerCase();
   if (!q) return res.json({ results: [] });
   const me = req.user;
-  const results = Object.values(users)
-    .filter((u) => u.email !== me.email && u.name.toLowerCase().includes(q))
-    .slice(0, 20)
-    .map((u) => ({
-      name: u.name,
-      email: u.email,
-      isFollowing: (me.following || []).includes(u.email),
-      isLive: !!liveUsers[u.email],
-      roomCode: liveUsers[u.email] || null,
-    }));
-  res.json({ results });
+  try {
+    const results = Object.values(users)
+      .filter((u) => u.email !== me.email && (u.name || "").toLowerCase().includes(q))
+      .slice(0, 20)
+      .map((u) => ({
+        name: u.name,
+        email: u.email,
+        avatarUrl: u.avatarUrl || "",
+        isFollowing: (me.following || []).includes(u.email),
+        isLive: !!liveUsers[u.email],
+        roomCode: liveUsers[u.email] || null,
+      }));
+    res.json({ results });
+  } catch (e) {
+    console.error("Error en /api/search-players:", e.message);
+    res.status(500).json({ error: "Error buscando.", results: [] });
+  }
 });
 
 app.get("/api/following", authMiddleware, (req, res) => {
@@ -710,7 +732,7 @@ app.get("/api/following", authMiddleware, (req, res) => {
   const results = following
     .map((email) => users[email])
     .filter(Boolean)
-    .map((u) => ({ name: u.name, email: u.email, isLive: !!liveUsers[u.email], roomCode: liveUsers[u.email] || null }));
+    .map((u) => ({ name: u.name, email: u.email, avatarUrl: u.avatarUrl || "", isLive: !!liveUsers[u.email], roomCode: liveUsers[u.email] || null }));
   res.json({ results });
 });
 
@@ -1510,6 +1532,44 @@ async function sendPaypalPayout(receiverEmail, usdAmount, note) {
     return { ok: false, error: "No se pudo conectar con PayPal: " + e.message };
   }
 }
+
+// ---------------- Respaldo completo: todo lo importante en un solo archivo descargable ----------------
+// ---------------- Comisión de la plataforma sobre los retiros: configurable ----------------
+app.get("/api/admin/platform-fee", adminOrStaff("limitado"), (req, res) => {
+  res.json({ fee: PLATFORM_FEE, feePercent: Math.round(PLATFORM_FEE * 100) });
+});
+
+app.post("/api/admin/platform-fee", adminOrStaff("full"), (req, res) => {
+  const percent = parseFloat(req.body.percent);
+  if (isNaN(percent) || percent < 0 || percent > 100) {
+    return res.status(400).json({ error: "Poné un porcentaje entre 0 y 100." });
+  }
+  PLATFORM_FEE = percent / 100;
+  savePlatformFee(PLATFORM_FEE);
+  res.json({ ok: true, fee: PLATFORM_FEE, feePercent: percent });
+});
+
+app.get("/api/admin/backup", adminAuthMiddleware, (req, res) => {
+  const backup = {
+    createdAt: new Date().toISOString(),
+    users, // ya está en memoria, no hace falta releerlo del disco
+    posts: loadPosts(),
+    dms: loadDMs(),
+    subscriptions: loadSubscriptions(),
+    gifts: loadGifts(),
+    reports: loadReports(),
+    withdrawals: (() => { try { return JSON.parse(fs.readFileSync(WITHDRAWALS_FILE, "utf8")); } catch (e) { return []; } })(),
+    monetizationRequests: (() => { try { return JSON.parse(fs.readFileSync(MONETIZATION_FILE, "utf8")); } catch (e) { return []; } })(),
+    supportMessages: loadSupportMessages(),
+    scheduledMeetings: loadScheduledMeetings(),
+    meetingPlans: (() => { try { return JSON.parse(fs.readFileSync(MEETING_PLANS_FILE, "utf8")); } catch (e) { return {}; } })(),
+    platformFee: PLATFORM_FEE,
+  };
+  const filename = "tablelive_respaldo_" + new Date().toISOString().slice(0, 10) + ".json";
+  res.setHeader("Content-Disposition", "attachment; filename=" + filename);
+  res.setHeader("Content-Type", "application/json");
+  res.send(JSON.stringify(backup, null, 2));
+});
 
 app.get("/api/paypal/config", (req, res) => {
   res.json({ clientId: PAYPAL_CLIENT_ID, packs: GEM_PACKS, configured: !!(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET), platformFee: PLATFORM_FEE });

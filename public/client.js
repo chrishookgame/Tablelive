@@ -492,7 +492,7 @@ function switchLobbyTab(tab) {
   document.querySelectorAll("#bottom-nav .nav-btn").forEach((b) => {
     b.classList.toggle("selected", b.dataset.tab === tab);
   });
-  if (tab === "messages") loadConversations();
+  if (tab === "messages") { loadConversations(); loadFollowing(); }
   else stopThreadPolling();
   if (tab === "profile") initInstallSection();
 }
@@ -1441,6 +1441,10 @@ function closePostViewer() {
   document.getElementById("feed-videos-view").classList.add("hidden");
 }
 document.getElementById("post-viewer-close").addEventListener("click", closePostViewer);
+document.getElementById("post-viewer-search-btn").addEventListener("click", () => {
+  closePostViewer();
+  switchLobbyTab("search");
+});
 
 document.getElementById("post-like-btn").addEventListener("click", async () => {
   if (!currentViewedPost) return;
@@ -2081,9 +2085,33 @@ async function loadFollowing() {
     if (!data.results.length) { wrap.innerHTML = '<p class="empty-msg-small">Todavía no seguís a nadie. Buscá jugadores arriba.</p>'; return; }
     wrap.innerHTML = data.results.map((r) => playerRowHtml({ ...r, isFollowing: true })).join("");
     attachPlayerRowHandlers(wrap);
+    renderFollowingLiveRow(data.results);
   } catch (e) {
     wrap.innerHTML = '<p class="empty-msg-small">Error cargando.</p>';
   }
+}
+
+// Como en TikTok: círculos arriba de Mensajes mostrando a quién de los que seguís
+// está en vivo ahora mismo, tocable para entrar directo.
+function renderFollowingLiveRow(list) {
+  const row = document.getElementById("following-live-row");
+  if (!row) return;
+  const liveOnes = (list || []).filter((p) => p.isLive);
+  if (!liveOnes.length) { row.classList.add("hidden"); row.innerHTML = ""; return; }
+  row.classList.remove("hidden");
+  row.innerHTML = liveOnes.map((p) => {
+    const initial = (p.name || "?").trim().charAt(0).toUpperCase();
+    const avatarHtml = p.avatarUrl
+      ? `<img src="${p.avatarUrl}" alt="" />`
+      : `<span class="following-live-fallback" style="background:${colorForName(p.name || "?")}">${initial}</span>`;
+    return `<div class="following-live-circle" data-watch-live="${p.roomCode}">
+      <div class="following-live-ring">${avatarHtml}</div>
+      <span>${escapeHtml((p.name || "").slice(0, 10))}</span>
+    </div>`;
+  }).join("");
+  row.querySelectorAll("[data-watch-live]").forEach((el) => {
+    el.addEventListener("click", () => { location.href = "/?watch=" + el.dataset.watchLive; });
+  });
 }
 
 function playerRowHtml(p) {

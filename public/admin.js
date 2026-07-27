@@ -67,6 +67,9 @@ document.getElementById("staff-login-btn").addEventListener("click", async () =>
 
 document.getElementById("refresh-btn").addEventListener("click", loadEverything);
 
+document.getElementById("download-backup-btn").addEventListener("click", () => {
+  window.open("/api/admin/backup?t=" + encodeURIComponent(adminToken), "_blank");
+});
 document.getElementById("announce-btn").addEventListener("click", async () => {
   const input = document.getElementById("announce-text");
   const msg = document.getElementById("announce-msg");
@@ -124,7 +127,26 @@ function loadEverything() {
   loadAdminSubscriptions();
   loadAdminReports();
   loadSupportMessages();
+  loadPlatformFee();
 }
+
+async function loadPlatformFee() {
+  const res = await adminFetch("/api/admin/platform-fee");
+  if (!res) return;
+  const data = await res.json();
+  document.getElementById("platform-fee-input").value = data.feePercent;
+}
+
+document.getElementById("save-platform-fee-btn").addEventListener("click", async () => {
+  const percent = document.getElementById("platform-fee-input").value;
+  const msg = document.getElementById("platform-fee-msg");
+  const res = await adminFetch("/api/admin/platform-fee", { method: "POST", body: JSON.stringify({ percent }) });
+  if (!res) return;
+  const data = await res.json();
+  if (!res.ok) { msg.style.color = "#ff8a80"; msg.textContent = data.error; return; }
+  msg.style.color = "#8fd4a8";
+  msg.textContent = "¡Guardado! Ahora la plataforma se queda el " + data.feePercent + "% de cada retiro.";
+});
 
 async function loadOverview() {
   const res = await adminFetch("/api/admin/overview");

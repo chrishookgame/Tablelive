@@ -62,6 +62,23 @@
     <h2 class="section-title">📊 Estadísticas generales</h2>
     <div id="stats-grid" class="stats-grid"></div>
 
+    <h2 class="section-title master-admin-only">💾 Respaldo completo</h2>
+    <div class="card master-admin-only">
+      <p style="font-size:12px;color:#cfe3da;margin-bottom:10px;">Descarga en un solo archivo TODOS los datos de la plataforma: usuarios, publicaciones, mensajes, retiros, reuniones, todo. Guardalo en un lugar seguro por las dudas.</p>
+      <button id="download-backup-btn" class="mini-btn">⬇️ Descargar respaldo ahora</button>
+    </div>
+
+    <h2 class="section-title needs-full">💰 Comisión de la plataforma</h2>
+    <div class="card needs-full">
+      <p style="font-size:12px;color:#cfe3da;margin-bottom:10px;">De cada retiro que pide un usuario, este es el porcentaje que se queda la plataforma (el resto le llega a la persona).</p>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="platform-fee-input" type="number" min="0" max="100" step="1" style="width:auto;flex:1;" />
+        <span style="color:#e0a63e;font-weight:700;">%</span>
+        <button id="save-platform-fee-btn" class="mini-btn" style="width:auto;">Guardar</button>
+      </div>
+      <p id="platform-fee-msg" style="font-size:12px;color:#8fd4a8;margin-top:8px;"></p>
+    </div>
+
     <h2 class="section-title">📢 Anuncio a toda la plataforma</h2>
     <div class="card">
       <input id="announce-text" type="text" placeholder="Escribí un mensaje para todos los usuarios conectados..." maxlength="300" />
