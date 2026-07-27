@@ -317,52 +317,125 @@ async function decideMonetization(email, submittedAt, approve) {
 function renderUsers(list) {
   const tbody = document.querySelector("#users-table tbody");
   if (!list || list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-msg">Todavía no hay usuarios registrados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">Todavía no hay usuarios registrados.</td></tr>';
     return;
   }
-  tbody.innerHTML = list.map((u) => `
+  tbody.innerHTML = list.map((u) => {
+    const giftsBlocked = u.giftsBlockedUntil && u.giftsBlockedUntil > Date.now();
+    return `
     <tr>
-      <td>${escapeHtml(u.name)}</td>
+      <td>${escapeHtml(u.name)}${u.isPlatformOwner ? " ★" : ""}${giftsBlocked ? ' <span title="Regalos bloqueados">🎁🚫</span>' : ""}</td>
       <td>${escapeHtml(u.email)}</td>
-      <td>${escapeHtml(u.paypalEmail)}</td>
-      <td>🪙 ${u.coinBalance}</td>
-      <td>💎 ${u.diamondBalance}</td>
+      <td>🪙 ${u.coinBalance} · 💎 ${u.diamondBalance}</td>
       <td>${u.followerCount}</td>
       <td class="${u.blocked ? 'badge-banned' : u.suspended ? 'badge-banned' : u.banned ? 'badge-banned' : 'badge-active'}">${u.blocked ? "Bloqueado" : u.suspended ? "Suspendido" : u.banned ? "Baneado" : "Activo"}</td>
       <td class="user-actions">
-        <input type="number" placeholder="🪙" id="coin-${cssSafe(u.email)}" class="master-admin-only" />
-        <input type="number" placeholder="💎" id="diamond-${cssSafe(u.email)}" class="master-admin-only" />
-        <button class="mini-btn master-admin-only" onclick="adjustBalance('${escapeHtml(u.email)}')">Fijar</button>
-        <button class="mini-btn needs-parcial" onclick="toggleBan('${escapeHtml(u.email)}', ${!u.banned})">${u.banned ? "Desbanear" : "Banear"}</button>
-        <button class="mini-btn needs-full" onclick="toggleSuspend('${escapeHtml(u.email)}', ${!u.suspended})" style="background:#8a6d1a;color:#fff;">${u.suspended ? "Reactivar" : "Suspender"}</button>
-        <button class="mini-btn needs-full" onclick="toggleBlock('${escapeHtml(u.email)}', ${!u.blocked})" style="background:#943838;color:#fff;">${u.blocked ? "Desbloquear" : "Bloquear"}</button>
-        <button class="mini-btn needs-parcial" onclick="verifyEmailAdmin('${escapeHtml(u.email)}')">Verificar email</button>
-        <button class="mini-btn master-admin-only" onclick="toggleOwner('${escapeHtml(u.email)}', ${!u.isPlatformOwner})">${u.isPlatformOwner ? "★ Quitar dueño" : "☆ Hacer dueño (reuniones sin límite)"}</button>
-        <button class="mini-btn needs-full" onclick="deleteUserAdmin('${escapeHtml(u.email)}')" style="background:#7a2020;color:#fff;">Borrar cuenta</button>
+        <button class="mini-btn" onclick="openUserDetail('${escapeHtml(u.email)}')">⚙️ Gestionar</button>
       </td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 }
 function cssSafe(email) { return (email || "").replace(/[^a-zA-Z0-9]/g, "_"); }
 
-async function toggleOwner(email, isPlatformOwner) {
-  await adminFetch("/api/admin/user/set-owner", { method: "POST", body: JSON.stringify({ email, isPlatformOwner }) });
-  loadOverview();
-}
+let currentDetailEmail = null;
+async function openUserDetail(email) {
+  currentDetailEmail = email;
+  const modal = document.getElementById("user-detail-modal");
+  modal.classList.remove("hidden");
+  document.getElementById("user-detail-body").innerHTML = '<p class="empty-msg">Cargando...</p>';
+  const res = await adminFetch("/api/admin/user/" + encodeURIComponent(email) + "/detail");
+  if (!res) return;
+  const u = await res.json();
+  const giftsBlocked = u.giftsBlockedUntil && u.giftsBlockedUntil > Date.now();
+  const giftsMinsLeft = giftsBlocked ? Math.ceil((u.giftsBlockedUntil - Date.now()) / 60000) : 0;
+  document.getElementById("user-detail-body").innerHTML = `
+    <h3 style="margin-bottom:2px;">${escapeHtml(u.name)}${u.isPlatformOwner ? " ★ Dueño de la plataforma" : ""}</h3>
+    <p style="font-size:12px;color:#9fc9b8;margin-top:0;">${escapeHtml(u.email)} · registrado el ${new Date(u.createdAt).toLocaleDateString()}</p>
 
-async function adjustBalance(email) {
-  const coinInput = document.getElementById("coin-" + cssSafe(email));
-  const diamondInput = document.getElementById("diamond-" + cssSafe(email));
+    <div class="detail-grid">
+      <div><b>Nombre legal</b><br>${escapeHtml(u.legalName || "—")}</div>
+      <div><b>Teléfono</b><br>${escapeHtml(u.phone || "—")}</div>
+      <div><b>País</b><br>${escapeHtml(u.country || "—")}</div>
+      <div><b>Email verificado</b><br>${u.emailVerified ? "✅ Sí" : "❌ No"}</div>
+      <div><b>Seguidores</b><br>${u.followerCount}</div>
+      <div><b>Siguiendo</b><br>${u.followingCount}</div>
+      <div><b>Monetización</b><br>${escapeHtml(u.monetizationStatus)}</div>
+      <div><b>Puesto de personal</b><br>${u.staffRole ? escapeHtml(u.staffRole.roleName) + " (" + u.staffRole.accessLevel + ")" : "—"}</div>
+    </div>
+
+    <p class="settings-label" style="margin-top:14px;">Datos de pago</p>
+    <div class="detail-grid">
+      <div><b>Email de PayPal</b><br>${escapeHtml(u.paypalEmail || "—")}</div>
+      <div><b>Banco</b><br>${escapeHtml(u.bankName || "—")}</div>
+      <div><b>Cuenta</b><br>${escapeHtml(u.bankAccountNumber || "—")}</div>
+      <div><b>Titular</b><br>${escapeHtml(u.bankAccountHolder || "—")}</div>
+    </div>
+
+    <p class="settings-label master-admin-only" style="margin-top:14px;">Saldo</p>
+    <div class="master-admin-only" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+      <input type="number" placeholder="🪙 ${u.coinBalance}" id="detail-coin" style="width:auto;flex:1;" />
+      <input type="number" placeholder="💎 ${u.diamondBalance}" id="detail-diamond" style="width:auto;flex:1;" />
+      <button class="mini-btn" style="width:auto;" onclick="adjustBalanceDetail('${escapeHtml(u.email)}')">Fijar</button>
+    </div>
+
+    <p class="settings-label needs-full" style="margin-top:14px;">🎁 Bloquear regalos por un tiempo</p>
+    <div class="needs-full" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+      <select id="detail-gift-block-mins" style="width:auto;flex:1;">
+        <option value="10">10 minutos</option>
+        <option value="60">1 hora</option>
+        <option value="1440">1 día</option>
+        <option value="10080">1 semana</option>
+      </select>
+      <button class="mini-btn" style="width:auto;background:#8a6d1a;color:#fff;" onclick="blockGiftsDetail('${escapeHtml(u.email)}')">Bloquear</button>
+      ${giftsBlocked ? `<button class="mini-btn" style="width:auto;" onclick="blockGiftsDetail('${escapeHtml(u.email)}', true)">Sacar bloqueo</button>` : ""}
+    </div>
+    ${giftsBlocked ? `<p style="font-size:11px;color:#e0a63e;margin-top:0;">🎁🚫 Bloqueado por ${giftsMinsLeft} minuto${giftsMinsLeft === 1 ? "" : "s"} más.</p>` : ""}
+
+    <p class="settings-label" style="margin-top:14px;">Estado de la cuenta</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+      <button class="mini-btn needs-parcial" onclick="toggleBan('${escapeHtml(u.email)}', ${!u.banned})">${u.banned ? "Desbanear" : "Banear"}</button>
+      <button class="mini-btn needs-full" style="background:#8a6d1a;color:#fff;" onclick="toggleSuspend('${escapeHtml(u.email)}', ${!u.suspended})">${u.suspended ? "Reactivar" : "Suspender"}</button>
+      <button class="mini-btn needs-full" style="background:#943838;color:#fff;" onclick="toggleBlock('${escapeHtml(u.email)}', ${!u.blocked})">${u.blocked ? "Desbloquear" : "Bloquear"}</button>
+      <button class="mini-btn needs-parcial" onclick="verifyEmailAdmin('${escapeHtml(u.email)}')">Verificar email</button>
+      <button class="mini-btn master-admin-only" onclick="toggleOwner('${escapeHtml(u.email)}', ${!u.isPlatformOwner})">${u.isPlatformOwner ? "★ Quitar dueño" : "☆ Hacer dueño"}</button>
+      <button class="mini-btn needs-full" style="background:#7a2020;color:#fff;" onclick="deleteUserAdmin('${escapeHtml(u.email)}')">Borrar cuenta</button>
+    </div>
+  `;
+  applyAccessLevelVisibility();
+}
+document.getElementById("close-user-detail-modal").addEventListener("click", () => {
+  document.getElementById("user-detail-modal").classList.add("hidden");
+});
+
+async function adjustBalanceDetail(email) {
+  const coinInput = document.getElementById("detail-coin");
+  const diamondInput = document.getElementById("detail-diamond");
   const body = { email };
   if (coinInput.value !== "") body.coinBalance = parseInt(coinInput.value, 10);
   if (diamondInput.value !== "") body.diamondBalance = parseInt(diamondInput.value, 10);
   await adminFetch("/api/admin/user/adjust-balance", { method: "POST", body: JSON.stringify(body) });
+  openUserDetail(email);
+  loadOverview();
+}
+
+async function blockGiftsDetail(email, clear) {
+  const minutes = clear ? 0 : document.getElementById("detail-gift-block-mins").value;
+  await adminFetch("/api/admin/user/block-gifts", { method: "POST", body: JSON.stringify({ email, minutes }) });
+  openUserDetail(email);
+  loadOverview();
+}
+
+async function toggleOwner(email, isPlatformOwner) {
+  await adminFetch("/api/admin/user/set-owner", { method: "POST", body: JSON.stringify({ email, isPlatformOwner }) });
+  if (currentDetailEmail === email) openUserDetail(email);
   loadOverview();
 }
 
 async function toggleBan(email, banned) {
   if (banned && !confirm("¿Seguro que querés banear a " + email + "? No va a poder iniciar sesión.")) return;
   await adminFetch("/api/admin/user/ban", { method: "POST", body: JSON.stringify({ email, banned }) });
+  if (currentDetailEmail === email) openUserDetail(email);
   loadOverview();
 }
 
@@ -370,6 +443,7 @@ async function toggleBan(email, banned) {
 async function toggleSuspend(email, suspended) {
   if (suspended && !confirm("¿Suspender temporalmente a " + email + "? No va a poder iniciar sesión hasta que lo reactives.")) return;
   await adminFetch("/api/admin/user/suspend", { method: "POST", body: JSON.stringify({ email, suspended }) });
+  if (currentDetailEmail === email) openUserDetail(email);
   loadOverview();
 }
 
@@ -377,17 +451,20 @@ async function toggleSuspend(email, suspended) {
 async function toggleBlock(email, blocked) {
   if (blocked && !confirm("¿Bloquear a " + email + "? Es más definitivo que suspender, pensalo para casos graves.")) return;
   await adminFetch("/api/admin/user/block", { method: "POST", body: JSON.stringify({ email, blocked }) });
+  if (currentDetailEmail === email) openUserDetail(email);
   loadOverview();
 }
 
 async function verifyEmailAdmin(email) {
   await adminFetch("/api/admin/user/verify-email", { method: "POST", body: JSON.stringify({ email }) });
+  if (currentDetailEmail === email) openUserDetail(email);
   loadOverview();
 }
 
 async function deleteUserAdmin(email) {
   if (!confirm("¿Seguro que querés BORRAR la cuenta de " + email + "? Esto no se puede deshacer.")) return;
   await adminFetch("/api/admin/user/delete", { method: "POST", body: JSON.stringify({ email }) });
+  document.getElementById("user-detail-modal").classList.add("hidden");
   loadOverview();
 }
 
@@ -498,18 +575,41 @@ async function loadSupportMessages() {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-msg">No hay mensajes de soporte todavía.</td></tr>';
     return;
   }
-  tbody.innerHTML = data.messages.map((m) => `
+  tbody.innerHTML = data.messages.map((m) => {
+    const repliesHtml = (m.replies || []).map((r) =>
+      `<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:${r.from === 'admin' ? 'rgba(224,166,62,0.12)' : 'rgba(255,255,255,0.05)'};">
+        <b style="font-size:11px;color:${r.from === 'admin' ? '#e0a63e' : '#9fc9b8'};">${r.from === 'admin' ? '🛡️ ' + escapeHtml(r.byName) : escapeHtml(r.byName)}</b>
+        <p style="margin:2px 0 0;white-space:pre-wrap;">${escapeHtml(r.text)}</p>
+      </div>`
+    ).join("");
+    return `
     <tr>
       <td>${fmtDate(m.createdAt)}</td>
       <td>${escapeHtml(m.name)}<br><span style="font-size:11px;color:#9fc9b8;">${escapeHtml(m.email)}</span></td>
       <td>${escapeHtml(m.subject)}</td>
-      <td style="max-width:320px;white-space:pre-wrap;">${escapeHtml(m.message)}</td>
+      <td style="max-width:320px;white-space:pre-wrap;">
+        ${escapeHtml(m.message)}
+        ${repliesHtml}
+        <div style="margin-top:8px;display:flex;gap:4px;">
+          <input type="text" placeholder="Escribir respuesta..." id="reply-input-${m.id}" style="flex:1;margin:0;font-size:11px;" />
+          <button class="mini-btn" style="width:auto;" onclick="replySupport('${m.id}')">Responder</button>
+        </div>
+      </td>
       <td class="badge-${m.status === 'resuelto' ? 'pagado' : 'pendiente'}">${m.status}</td>
       <td>
         <button class="mini-btn" onclick="resolveSupport('${m.id}','${m.status === 'resuelto' ? 'abierto' : 'resuelto'}')">${m.status === 'resuelto' ? 'Reabrir' : 'Marcar resuelto'}</button>
       </td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
+}
+
+async function replySupport(id) {
+  const input = document.getElementById("reply-input-" + id);
+  const text = input.value.trim();
+  if (!text) return;
+  await adminFetch("/api/admin/support/reply", { method: "POST", body: JSON.stringify({ id, text }) });
+  loadSupportMessages();
 }
 
 async function resolveSupport(id, status) {

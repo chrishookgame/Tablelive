@@ -137,9 +137,16 @@
 
     <h2 class="section-title">Usuarios registrados</h2>
     <table id="users-table">
-      <thead><tr><th>Nombre</th><th>Email</th><th>PayPal</th><th>Monedas</th><th>Diamantes</th><th>Seguidores</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Saldo</th><th>Seguidores</th><th>Estado</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table>
+
+    <div id="user-detail-modal" class="hidden" style="position:fixed;inset:0;z-index:90;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;padding:16px;">
+      <div class="card" style="max-width:500px;width:100%;max-height:85vh;overflow-y:auto;position:relative;">
+        <button id="close-user-detail-modal" style="width:auto;position:absolute;top:10px;right:10px;">✕</button>
+        <div id="user-detail-body"></div>
+      </div>
+    </div>
 
     <h2 class="section-title">Salas activas ahora</h2>
     <table id="rooms-table">

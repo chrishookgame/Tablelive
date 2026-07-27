@@ -132,6 +132,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .rail-btn span { font-size: 10px; color: #cfe3da; }
 .rail-btn:active { transform: scale(0.92); }
+.rail-btn.active { background: rgba(224,166,62,0.95); border-color: #e0a63e; color: #1c1c1c; }
+.rail-btn.active span { color: #1c1c1c; }
 
 #reaction-layer {
   position: fixed;
@@ -521,6 +523,7 @@ body { overflow-x: hidden; }
 }
 .player-row:last-child { border-bottom: none; }
 .player-name { display: flex; align-items: center; gap: 6px; }
+.player-name-clickable { cursor: pointer; }
 .live-dot {
   width: 8px;
   height: 8px;
@@ -896,15 +899,55 @@ body { overflow-x: hidden; }
 
 #gift-picker {
   position: absolute;
-  background: #1c473c;
-  border-radius: 10px;
+  background: #0f2b23;
+  border: 1px solid rgba(224,166,62,0.4);
+  border-radius: 12px;
   padding: 8px;
-  display: flex;
-  gap: 6px;
   z-index: 20;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  width: 220px;
 }
-#gift-picker button { width: auto; margin: 0; padding: 6px 10px; }
+#gift-picker-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e0a63e;
+  padding: 2px 4px 8px;
+}
+#gift-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+.gift-catalog-item {
+  width: auto;
+  margin: 0;
+  padding: 6px 2px 8px;
+  background: rgba(224,166,62,0.08);
+  border: 1px solid rgba(224,166,62,0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.gift-catalog-item:active { background: rgba(224,166,62,0.25); }
+.gift-catalog-item-locked { opacity: 0.4; }
+.gift-catalog-icon { font-size: 20px; line-height: 1.3; }
+.gift-catalog-name { font-size: 9px; color: #cfe3da; }
+.gift-catalog-price { font-size: 10px; font-weight: 700; color: #e0a63e; }
+#gift-picker-buy-coins {
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 8px;
+  background: rgba(224,166,62,0.15);
+  border: 1px solid rgba(224,166,62,0.4);
+  color: #e0a63e;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+}
 
 #emoji-picker {
   position: fixed;
@@ -1046,20 +1089,51 @@ body { overflow-x: hidden; }
   margin-top: -14px;
 }
 #create-fab-btn {
-  width: 54px;
-  height: 40px;
-  min-width: 54px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #e0a63e, #c98a2c);
-  color: #1c1c1c;
-  font-size: 24px;
-  font-weight: 700;
+  position: relative;
+  width: 52px;
+  height: 34px;
+  min-width: 52px;
+  border-radius: 10px;
+  background: #fff;
+  color: transparent;
+  font-size: 0;
   margin: 0;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  border: none;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+}
+#create-fab-btn::before,
+#create-fab-btn::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: calc(100% - 8px);
+  border-radius: 10px;
+}
+#create-fab-btn::before {
+  left: -6px;
+  background: linear-gradient(135deg, #1fae7a, #0b3d2e);
+}
+#create-fab-btn::after {
+  right: -6px;
+  background: linear-gradient(135deg, #f4cf6a, #c98a2c);
+}
+#create-fab-btn span.fab-plus {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1;
 }
+#create-fab-btn span.fab-plus::before,
+#create-fab-btn span.fab-plus::after {
+  content: "";
+  position: absolute;
+  background: #1c1c1c;
+  border-radius: 2px;
+}
+#create-fab-btn span.fab-plus::before { width: 18px; height: 3.5px; }
+#create-fab-btn span.fab-plus::after { width: 3.5px; height: 18px; }
 
 /* ---------------- Toggle Feed: En vivo / Videos ---------------- */
 #feed-switch {
@@ -1324,6 +1398,7 @@ body { overflow-x: hidden; }
   padding: 6px 0;
 }
 .msg-bubble {
+  position: relative;
   max-width: 78%;
   padding: 8px 12px;
   border-radius: 16px;
@@ -1332,6 +1407,18 @@ body { overflow-x: hidden; }
 }
 .msg-bubble.mine { align-self: flex-end; background: #e0a63e; color: #1c1c1c; border-bottom-right-radius: 4px; }
 .msg-bubble.theirs { align-self: flex-start; background: #1c473c; color: #fff; border-bottom-left-radius: 4px; }
+.msg-bubble.msg-deleted { opacity: 0.55; font-style: italic; }
+.msg-delete-btn {
+  width: auto;
+  margin: 4px 0 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 11px;
+  display: block;
+}
 .btn-message { background: #1c473c; color: #cfe3da; border: 1px solid #2f6b58; }
 
 /* ---------------- Grabar video desde la cámara al crear contenido ---------------- */
@@ -1442,7 +1529,7 @@ body { overflow-x: hidden; }
   text-align: center;
   padding: 20px;
 }
-#battle-result-text { font-size: 24px; font-weight: 800; color: #e0a63e; text-shadow: 0 2px 6px rgba(0,0,0,0.6); }
+#battle-result-text { font-size: 24px; font-weight: 800; color: #e0a63e; text-shadow: 0 2px 6px rgba(0,0,0,0.6); white-space: pre-line; }
 
 /* Video partido a la mitad mientras hay una batalla activa */
 #video-bar.battle-split { flex-direction: row; }
@@ -1597,7 +1684,8 @@ body { overflow-x: hidden; }
 #live-nav {
   position: fixed;
   right: 10px;
-  bottom: 340px;
+  top: 50%;
+  transform: translateY(-50%);
   display: none;
   flex-direction: column;
   gap: 10px;
@@ -1605,25 +1693,64 @@ body { overflow-x: hidden; }
 }
 #live-nav.visible { display: flex; }
 #live-nav button {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
   border-radius: 50%;
-  background: rgba(0,0,0,0.45);
-  border: 1px solid rgba(224,166,62,0.4);
-  color: #fff;
-  font-size: 17px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(224,166,62,0.3);
+  color: rgba(255,255,255,0.8);
+  font-size: 15px;
+
   padding: 0;
   margin: 0;
 }
 
 #post-viewer-author-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-#post-viewer-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: none; }
+#post-viewer-avatar-wrap { position: relative; width: 36px; height: 36px; }
+#post-viewer-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: none; border: 2px solid #e0a63e; }
 #post-viewer-avatar-fallback {
-  width: 32px; height: 32px; border-radius: 50%; display: none;
+  width: 36px; height: 36px; border-radius: 50%; display: none;
   align-items: center; justify-content: center; font-weight: 700; color: #1c1c1c; font-size: 14px;
+  border: 2px solid #e0a63e;
 }
 #post-viewer-author { margin: 0; font-weight: 700; }
+
+/* Círculo de "seguir" pegado al avatar — estilo propio de TableLive (dorado/verde),
+   distinto del signo rojo de TikTok, pero con la misma idea de estar sobre la foto. */
+#post-follow-btn {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  border-radius: 50%;
+  background: #e0a63e;
+  border: 2px solid #0a1a15;
+  color: #1c1c1c;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#post-follow-btn.active { background: #2f6b58; color: #fff; }
+#post-follow-btn.hidden { display: none; }
+.fab-plus-mini { position: relative; display: block; width: 100%; height: 100%; }
+.fab-plus-mini::before, .fab-plus-mini::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  background: #1c1c1c;
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
+}
+.fab-plus-mini::before { width: 10px; height: 2px; }
+.fab-plus-mini::after { width: 2px; height: 10px; }
 
 /* ---------------- Insignia de perfil de quien transmite (foto + nombre) ---------------- */
 #host-badge {
@@ -1676,7 +1803,7 @@ body { overflow-x: hidden; }
   top: 96px;
   left: 12px;
   right: 90px;
-  z-index: 21;
+  z-index: 23;
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -1711,6 +1838,38 @@ body { overflow-x: hidden; }
   display: flex;
   align-items: flex-end;
   justify-content: center;
+}
+#viewers-list-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 81;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+#viewers-list-modal .card { width: 100%; max-width: 420px; max-height: 70vh; overflow-y: auto; border-radius: 16px 16px 0 0; }
+.viewer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(224,166,62,0.12);
+}
+.viewer-row:last-child { border-bottom: none; }
+.viewer-row-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #1c1c1c; font-weight: 700; font-size: 13px;
+}
+.spectator-count-clickable {
+  cursor: pointer;
+  background: rgba(0,0,0,0.4);
+  padding: 3px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(224,166,62,0.35);
+  display: inline-block;
 }
 #user-profile-card {
   background: #14332b;
@@ -1749,7 +1908,42 @@ body { overflow-x: hidden; }
   color: #1c1c1c;
 }
 #up-name { font-size: 18px; font-weight: 700; margin: 6px 0 2px; }
-#up-followers { font-size: 13px; color: #9fc9b8; margin-bottom: 14px; }
+#up-followers { font-size: 13px; color: #9fc9b8; }
+#up-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+#up-level-badge {
+  background: rgba(224,166,62,0.15);
+  border: 1px solid rgba(224,166,62,0.5);
+  color: #e0a63e;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+#up-gifts-gallery {
+  background: rgba(15,43,35,0.6);
+  border: 1px solid rgba(224,166,62,0.25);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 14px;
+  text-align: left;
+}
+#up-gifts-total { font-size: 12px; color: #cfe3da; margin: 4px 0 10px; }
+.up-gift-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #fff;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(224,166,62,0.12);
+}
+.up-gift-row:last-child { border-bottom: none; }
 #up-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 #up-actions button { width: auto; padding: 8px 14px; margin: 0; font-size: 13px; }
 #up-videos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 10px; }
@@ -1898,6 +2092,7 @@ body { overflow-x: hidden; }
 /* ---------------- Interruptor del anfitrión para abrir/cerrar ventanillas ---------------- */
 #toggle-guests-open-btn { background: #0f2b23; color: #cfe3da; border: 1px solid #2f6b58; }
 #toggle-guests-open-btn.guests-open-active { background: #2f9e5c; color: #fff; border: 1px solid #2f9e5c; }
+#toggle-comments-closed-btn.comments-closed-active { background: #7a2020; color: #fff; border: 1px solid #7a2020; }
 
 /* ---------------- Fondos virtuales ---------------- */
 .vbg-row {
@@ -1967,3 +2162,191 @@ body { overflow-x: hidden; }
   15% { opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
 }
+
+/* ---------------- Info encima de cada video (nombre, mic, anfitrión, botones) ---------------- */
+.tile-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  padding: 6px;
+}
+.tile-overlay:empty { display: none; }
+.tile-host-badge {
+  align-self: flex-start;
+  background: rgba(224,166,62,0.92);
+  color: #1c1c1c;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  pointer-events: auto;
+}
+.tile-controls-row {
+  align-self: flex-end;
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+.tile-icon-btn {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 11px;
+  padding: 0;
+  margin: 0;
+}
+.tile-icon-btn.active { background: rgba(224,166,62,0.9); color: #1c1c1c; }
+.tile-icon-btn.tile-icon-danger { background: rgba(122,32,32,0.85); }
+.tile-name-row {
+  pointer-events: auto;
+  cursor: pointer;
+  align-self: flex-start;
+  background: rgba(0,0,0,0.55);
+  border-radius: 20px;
+  padding: 3px 10px;
+  max-width: 90%;
+}
+.tile-name {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+/* ---------------- En vivo mezclado dentro del feed "Para ti" ---------------- */
+.live-preview-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 40%, rgba(224,80,62,0.18) 0%, #0a1a15 70%);
+}
+.live-preview-badge {
+  background: #e0503e;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  animation: liveBadgePulse 1.6s ease-in-out infinite;
+}
+@keyframes liveBadgePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+.live-preview-players { font-size: 20px; font-weight: 700; color: #fff; max-width: 90%; }
+.live-preview-meta { font-size: 13px; color: #9fc9b8; }
+.live-preview-card .btn-watch { width: auto; padding: 14px 28px; font-size: 15px; border-radius: 30px; margin-top: 8px; }
+
+/* ---------------- Filtros al publicar foto/video ---------------- */
+.create-filter-swatch {
+  width: auto;
+  white-space: nowrap;
+  padding: 8px 12px;
+  margin: 0;
+  border-radius: 20px;
+  background: rgba(15,43,35,0.85);
+  border: 1px solid rgba(224,166,62,0.3);
+  color: #cfe3da;
+  font-size: 12px;
+}
+.create-filter-swatch.selected { background: rgba(224,166,62,0.9); color: #1c1c1c; border-color: #e0a63e; }
+
+#create-photo-preview.pf-warm, #create-video-preview.pf-warm { filter: saturate(1.2) hue-rotate(-8deg) brightness(1.06) sepia(0.12); }
+#create-photo-preview.pf-golden, #create-video-preview.pf-golden { filter: sepia(0.32) saturate(1.45) hue-rotate(-12deg) brightness(1.12) contrast(1.05); }
+#create-photo-preview.pf-vintage, #create-video-preview.pf-vintage { filter: sepia(0.35) contrast(0.95) brightness(0.96) saturate(0.8); }
+#create-photo-preview.pf-cinematic, #create-video-preview.pf-cinematic { filter: contrast(1.18) saturate(0.88) brightness(0.95) hue-rotate(-5deg); }
+#create-photo-preview.pf-vivid, #create-video-preview.pf-vivid { filter: saturate(1.6) contrast(1.15) brightness(1.03); }
+#create-photo-preview.pf-cool, #create-video-preview.pf-cool { filter: saturate(1.1) hue-rotate(15deg) brightness(1.02) contrast(1.05); }
+#create-photo-preview.pf-bw, #create-video-preview.pf-bw { filter: grayscale(1) contrast(1.1); }
+#create-photo-preview.pf-softglow, #create-video-preview.pf-softglow { filter: brightness(1.14) contrast(0.9) saturate(1.08) blur(0.4px); }
+#create-photo-preview.pf-retro, #create-video-preview.pf-retro { filter: sepia(0.28) saturate(1.3) contrast(1.1) hue-rotate(-8deg) brightness(0.97); }
+
+/* ---------------- Tocar el nombre de quien comenta en el en vivo abre su perfil ---------------- */
+.chat-line-name-clickable { cursor: pointer; }
+
+/* ---------------- Cartel de "Reconectando..." (discreto, no te saca de la cuenta) ---------------- */
+#connection-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 998;
+  background: rgba(224,166,62,0.95);
+  color: #1c1c1c;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 0;
+}
+
+/* ---------------- Aviso de "alguien que seguís se puso en vivo" ---------------- */
+#followed-live-banner {
+  position: fixed;
+  top: 50px;
+  left: 12px;
+  right: 12px;
+  z-index: 997;
+  background: #0f2b23;
+  border: 1px solid rgba(224,166,62,0.5);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  animation: followedLiveSlideIn 0.3s ease;
+}
+@keyframes followedLiveSlideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+#followed-live-banner img, .followed-live-avatar-fallback {
+  width: 36px; height: 36px; border-radius: 50%; object-fit: cover;
+  display: flex; align-items: center; justify-content: center;
+  color: #1c1c1c; font-weight: 700; flex-shrink: 0;
+}
+.followed-live-text { flex: 1; color: #fff; font-size: 13px; }
+#followed-live-close { width: auto; margin: 0; padding: 4px 8px; background: none; border: none; color: #9fc9b8; font-size: 14px; }
+
+/* ---------------- Grilla de datos del detalle de usuario (panel de admin) ---------------- */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  font-size: 12px;
+  color: #cfe3da;
+}
+.detail-grid b { color: #e0a63e; font-size: 11px; }
+
+/* ---------------- Mis conversaciones con soporte (Perfil) ---------------- */
+.support-thread-card {
+  background: rgba(15,43,35,0.6);
+  border: 1px solid rgba(224,166,62,0.25);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.support-thread-subject { font-weight: 700; color: #e0a63e; font-size: 13px; margin: 0 0 4px; display: flex; align-items: center; gap: 6px; }
+.support-thread-message { font-size: 12px; color: #cfe3da; margin: 0; white-space: pre-wrap; }
+.support-reply-row {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.05);
+}
+.support-reply-row.support-reply-admin { background: rgba(224,166,62,0.12); }
+.support-reply-row b { font-size: 11px; color: #9fc9b8; }
+.support-reply-row.support-reply-admin b { color: #e0a63e; }
+.support-reply-row p { margin: 2px 0 0; font-size: 12px; color: #fff; white-space: pre-wrap; }
+.mini-btn-inline { width: auto; margin: 0; padding: 6px 12px; font-size: 12px; background: #e0a63e; color: #1c1c1c; border-radius: 8px; }

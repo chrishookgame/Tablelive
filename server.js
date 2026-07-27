@@ -4,6 +4,17 @@ const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
 const fs = require("fs");
+
+// Guarda un archivo de datos SIN bloquear el servidor mientras escribe. Antes cada
+// guardado usaba writeFileSync, que congela TODO el servidor (todas las partidas,
+// todos los usuarios conectados) durante el tiempo que tarda en escribir en disco.
+// Con esto, el servidor sigue atendiendo a todo el mundo mientras el guardado
+// termina solo, en segundo plano.
+function writeJSONAsync(filePath, data) {
+  fs.writeFile(filePath, JSON.stringify(data, null, 2), (err) => {
+    if (err) console.error("Error guardando " + filePath + ":", err.message);
+  });
+}
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
@@ -94,7 +105,24 @@ const postUpload = multer({
 
 const nodemailer = require("nodemailer");
 
-// ---- Config de envío de correo (tu propia cuenta, va en variables de entorno) ----
+// ---- Config de envío de correo ----
+// OJO: Render bloquea los puertos de SMTP (25, 465, 587) en su plan gratis desde
+// septiembre de 2025 — por eso Gmail nunca podía mandar el correo ahí, sin importar
+// qué tan bien esté configurada la contraseña. La solución es mandar por HTTPS en vez
+// de SMTP. Dos opciones, en este orden de prioridad:
+//   1. BREVO — no necesita dominio propio, solo verificás tu email de Gmail con un
+//      código y ya podés mandarle a cualquier persona. La mejor opción si no tenés
+//      un dominio propio.
+//   2. RESEND — más simple para probar, pero con el remitente de prueba
+//      (onboarding@resend.dev) SOLO te deja mandar a tu propia cuenta de Resend, no
+//      a otras personas — hace falta verificar un dominio propio para mandarle a
+//      cualquiera.
+//   3. Gmail por SMTP como último respaldo (solo funciona fuera de Render Free).
+const BREVO_API_KEY = process.env.BREVO_API_KEY || "";
+const BREVO_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || "";
+const BREVO_FROM_NAME = process.env.BREVO_FROM_NAME || "TableLive";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const RESEND_FROM = process.env.RESEND_FROM || "TableLive <onboarding@resend.dev>";
 const EMAIL_USER = process.env.EMAIL_USER || "";
 const EMAIL_PASS = process.env.EMAIL_PASS || "";
 let mailTransporter = null;
@@ -109,45 +137,100 @@ function makeVerificationCode() {
   return String(Math.floor(100000 + Math.random() * 900000)); // codigo de 6 digitos
 }
 
-async function sendVerificationEmail(toEmail, name, code) {
-  if (!mailTransporter) {
-    console.log("[email no configurado] Código de verificación para " + toEmail + ": " + code);
+// Punto único de envío: intenta Brevo primero, después Resend, después Gmail.
+async function sendEmail(toEmail, subject, html) {
+  if (BREVO_API_KEY && BREVO_FROM_EMAIL) {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": BREVO_API_KEY },
+      body: JSON.stringify({
+        sender: { name: BREVO_FROM_NAME, email: BREVO_FROM_EMAIL },
+        to: [{ email: toEmail }],
+        subject,
+        htmlContent: html,
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error("Brevo respondió " + res.status + ": " + errText);
+    }
     return;
   }
-  await mailTransporter.sendMail({
-    from: '"TableLive" <' + EMAIL_USER + ">",
-    to: toEmail,
-    subject: "Tu código de confirmación de TableLive",
-    html: `<p>Hola ${name || ""},</p>
+  if (RESEND_API_KEY) {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + RESEND_API_KEY },
+      body: JSON.stringify({ from: RESEND_FROM, to: toEmail, subject, html }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error("Resend respondió " + res.status + ": " + errText);
+    }
+    return;
+  }
+  if (mailTransporter) {
+    await mailTransporter.sendMail({ from: '"TableLive" <' + EMAIL_USER + ">", to: toEmail, subject, html });
+    return;
+  }
+  throw new Error("No hay ningún servicio de email configurado (falta BREVO_API_KEY, RESEND_API_KEY o EMAIL_USER/EMAIL_PASS)");
+}
+
+async function sendVerificationEmail(toEmail, name, code) {
+  try {
+    await sendEmail(
+      toEmail,
+      "Tu código de confirmación de TableLive",
+      `<p>Hola ${name || ""},</p>
       <p>Tu código para confirmar tu cuenta en TableLive es:</p>
       <h2 style="letter-spacing:4px;">${code}</h2>
-      <p>Este código vence en 15 minutos. Si no creaste esta cuenta, ignorá este mensaje.</p>`,
-  });
+      <p>Este código vence en 15 minutos. Si no creaste esta cuenta, ignorá este mensaje.</p>`
+    );
+  } catch (e) {
+    console.log("[respaldo] Código de verificación para " + toEmail + ": " + code + " — error mandando el email:", e.message);
+  }
+}
+
+async function sendPasswordResetEmail(toEmail, name, code) {
+  try {
+    await sendEmail(
+      toEmail,
+      "Recuperar tu contraseña de TableLive",
+      `<p>Hola ${name || ""},</p>
+      <p>Alguien pidió cambiar la contraseña de tu cuenta en TableLive. Tu código es:</p>
+      <h2 style="letter-spacing:4px;">${code}</h2>
+      <p>Este código vence en 15 minutos. Si no fuiste vos, ignorá este mensaje — tu contraseña sigue siendo la misma.</p>`
+    );
+  } catch (e) {
+    console.log("[respaldo] Código para recuperar contraseña de " + toEmail + ": " + code + " — error mandando el email:", e.message);
+  }
 }
 
 // Invitación bien organizada para cada persona que el anfitrión invite a una reunión
 // programada — con el nombre del evento, la fecha/hora, y el código para entrar.
-async function sendMeetingInviteEmail(toEmail, hostName, label, scheduledForISO, code) {
+async function sendMeetingInviteEmail(toEmail, hostName, label, scheduledForISO, code, appBaseUrl) {
   const when = new Date(scheduledForISO);
   const fecha = when.toLocaleDateString("es", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const hora = when.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
-  if (!mailTransporter) {
-    console.log("[email no configurado] Invitación para " + toEmail + " al evento '" + label + "', código: " + code);
-    return;
-  }
-  await mailTransporter.sendMail({
-    from: '"TableLive" <' + EMAIL_USER + ">",
-    to: toEmail,
-    subject: "📅 Invitación: " + label,
-    html: `<div style="font-family:sans-serif;">
+  const inviteLink = (appBaseUrl || "").replace(/\/$/, "") + "/?joinMeeting=" + encodeURIComponent(code);
+  try {
+    await sendEmail(
+      toEmail,
+      "📅 Invitación: " + label,
+      `<div style="font-family:sans-serif;">
       <h2 style="color:#1B4332;">📅 Invitación a "${label}"</h2>
       <p><b>${hostName}</b> te invitó a una reunión en TableLive.</p>
       <p><b>Fecha:</b> ${fecha}<br><b>Horario:</b> ${hora} hs</p>
       <p>Tu código para entrar es:</p>
       <h1 style="letter-spacing:4px;color:#e0a63e;">${code}</h1>
-      <p>Cuando sea la hora, entrá a TableLive → "Unirme a una reunión" y poné ese código.</p>
-    </div>`,
-  });
+      <p style="margin-top:20px;">
+        <a href="${inviteLink}" style="background:#e0a63e;color:#1c1c1c;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">Entrar a la reunión</a>
+      </p>
+      <p style="font-size:12px;color:#666;">O entrá a TableLive → "Unirme a una reunión" y poné el código a mano cuando sea la hora.</p>
+    </div>`
+    );
+  } catch (e) {
+    console.log("[respaldo] Invitación para " + toEmail + " al evento '" + label + "', código: " + code + " — error mandando el email:", e.message);
+  }
 }
 
 // ---- Config ----
@@ -219,6 +302,20 @@ const POSTS_FILE = path.join(__dirname, "posts.json");
 const DM_FILE = path.join(__dirname, "dm_messages.json");
 const SUBSCRIPTIONS_FILE = path.join(__dirname, "subscriptions.json");
 const GIFTS_FILE = path.join(__dirname, "gifts.json");
+
+// Catálogo de regalos de TableLive: usa los MISMOS paquetes de monedas que ya vendés
+// (mismo ícono y nombre), así el que compra monedas ve exactamente esos "personajes"
+// disponibles para regalar. Los puntos de batalla NO son 1 a 1 con las monedas — los
+// caros valen desproporcionadamente más, para que un regalo grande cambie el marcador.
+const GIFT_CATALOG = {};
+Object.values(GEM_PACKS).forEach((pack, idx) => {
+  const multiplier = 1 + idx * 0.1; // va de 1x (el más barato) a ~3.1x (el más caro)
+  GIFT_CATALOG[pack.gems] = { name: pack.label, symbol: pack.symbol, battlePoints: Math.round(pack.gems * multiplier) };
+});
+function battlePointsForGift(coinAmount) {
+  const known = GIFT_CATALOG[coinAmount];
+  return known ? known.battlePoints : coinAmount; // monto libre (no del catálogo): 1 punto por moneda
+}
 const REPORTS_FILE = path.join(__dirname, "reports.json");
 const RECORDINGS_META_FILE = path.join(__dirname, "recordings.json");
 const SCHEDULED_MEETINGS_FILE = path.join(__dirname, "scheduled_meetings.json");
@@ -228,7 +325,7 @@ function loadSupportMessages() {
   try { return JSON.parse(fs.readFileSync(SUPPORT_MESSAGES_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveSupportMessages(list) {
-  fs.writeFileSync(SUPPORT_MESSAGES_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(SUPPORT_MESSAGES_FILE, list);
 }
 
 function loadUsers() {
@@ -244,49 +341,71 @@ function loadUsers() {
   return data;
 }
 function saveUsers(u) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(u, null, 2));
+  writeJSONAsync(USERS_FILE, u);
 }
 function loadPosts() {
   try { return JSON.parse(fs.readFileSync(POSTS_FILE, "utf8")); } catch (e) { return []; }
 }
 function savePosts(p) {
-  fs.writeFileSync(POSTS_FILE, JSON.stringify(p, null, 2));
+  writeJSONAsync(POSTS_FILE, p);
 }
 function loadDMs() {
   try { return JSON.parse(fs.readFileSync(DM_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveDMs(d) {
-  fs.writeFileSync(DM_FILE, JSON.stringify(d, null, 2));
+  writeJSONAsync(DM_FILE, d);
 }
 function loadSubscriptions() {
   try { return JSON.parse(fs.readFileSync(SUBSCRIPTIONS_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveSubscriptions(s) {
-  fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(s, null, 2));
+  writeJSONAsync(SUBSCRIPTIONS_FILE, s);
 }
 function loadGifts() {
   try { return JSON.parse(fs.readFileSync(GIFTS_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveGifts(g) {
-  fs.writeFileSync(GIFTS_FILE, JSON.stringify(g, null, 2));
+  writeJSONAsync(GIFTS_FILE, g);
+}
+
+// Como en TableLive los regalos son en monedas (no hay catálogo de ítems distintos como
+// en TikTok), la "galería de regalos" muestra lo recibido en total y quién más regaló.
+function giftStatsFor(email) {
+  const gifts = loadGifts();
+  const received = gifts.filter((g) => g.toEmail === email);
+  const totalReceived = received.reduce((sum, g) => sum + g.amount, 0);
+  const byGifter = {};
+  received.forEach((g) => {
+    if (!byGifter[g.fromEmail]) byGifter[g.fromEmail] = { email: g.fromEmail, name: g.fromName, amount: 0 };
+    byGifter[g.fromEmail].amount += g.amount;
+  });
+  const topGifters = Object.values(byGifter).sort((a, b) => b.amount - a.amount).slice(0, 5);
+  return { totalReceived, giftCount: received.length, topGifters };
+}
+
+// Nivel simple, con curva de raíz cuadrada (cada nivel cuesta un poco más que el anterior)
+// basado en cuánto recibió en regalos a lo largo del tiempo y cuántos seguidores tiene.
+function calculateLevel(totalReceived, followerCount) {
+  const points = totalReceived + followerCount * 5;
+  return Math.max(1, Math.floor(Math.sqrt(points / 10)) + 1);
 }
 function loadReports() {
   try { return JSON.parse(fs.readFileSync(REPORTS_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveReports(r) {
-  fs.writeFileSync(REPORTS_FILE, JSON.stringify(r, null, 2));
+  writeJSONAsync(REPORTS_FILE, r);
 }
 function loadRecordings() {
   try { return JSON.parse(fs.readFileSync(RECORDINGS_META_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveRecordings(r) {
-  fs.writeFileSync(RECORDINGS_META_FILE, JSON.stringify(r, null, 2));
+  writeJSONAsync(RECORDINGS_META_FILE, r);
 }
 function loadScheduledMeetings() {
   try { return JSON.parse(fs.readFileSync(SCHEDULED_MEETINGS_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveScheduledMeetings(m) {
-  fs.writeFileSync(SCHEDULED_MEETINGS_FILE, JSON.stringify(m, null, 2));
+  writeJSONAsync(SCHEDULED_MEETINGS_FILE, m);
 }
 function emailKey(email) { return (email || "").trim().toLowerCase(); }
 
@@ -419,8 +538,51 @@ app.post("/api/login", async (req, res) => {
   res.json({ token: makeToken(key), name: user.name, coinBalance: user.coinBalance, diamondBalance: user.diamondBalance, avatarUrl: user.avatarUrl || "", emailVerified: !!user.emailVerified, language: user.language || "es" });
 });
 
+// ---------------- Recuperar contraseña olvidada ----------------
+
+app.post("/api/forgot-password", async (req, res) => {
+  const key = emailKey(req.body.email);
+  const user = users[key];
+  // Por seguridad, contestamos "ok" siempre exista o no la cuenta — así nadie puede
+  // usar este formulario para averiguar qué emails están registrados en TableLive.
+  if (!user) return res.json({ ok: true });
+  user.resetCode = makeVerificationCode();
+  user.resetExpires = Date.now() + 15 * 60 * 1000;
+  saveUsers(users);
+  try {
+    await sendPasswordResetEmail(user.email, user.name, user.resetCode);
+  } catch (e) {
+    console.log("[respaldo] Código para recuperar contraseña de " + user.email + ": " + user.resetCode);
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  const key = emailKey(email);
+  const user = users[key];
+  if (!user) return res.status(400).json({ error: "Código incorrecto o vencido." });
+  if (!user.resetCode || Date.now() > (user.resetExpires || 0)) {
+    return res.status(400).json({ error: "Ese código venció. Pedí uno nuevo." });
+  }
+  if (String(code).trim() !== user.resetCode) {
+    return res.status(400).json({ error: "Código incorrecto." });
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: "La contraseña nueva tiene que tener al menos 6 caracteres." });
+  }
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.resetCode = null;
+  user.resetExpires = null;
+  saveUsers(users);
+  res.json({ ok: true });
+});
+
 function getFollowerCount(email) {
   return Object.values(users).filter((u) => (u.following || []).includes(email)).length;
+}
+function getFollowersList(email) {
+  return Object.values(users).filter((u) => (u.following || []).includes(email)).map((u) => u.email);
 }
 const MONETIZATION_THRESHOLD = 1000;
 
@@ -493,7 +655,7 @@ function loadMonetizationRequests() {
   try { return JSON.parse(fs.readFileSync(MONETIZATION_FILE, "utf8")); } catch (e) { return []; }
 }
 function saveMonetizationRequests(list) {
-  fs.writeFileSync(MONETIZATION_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(MONETIZATION_FILE, list);
 }
 
 app.post("/api/monetization/apply", authMiddleware, kycUpload.single("idDocument"), (req, res) => {
@@ -555,6 +717,9 @@ app.get("/api/following", authMiddleware, (req, res) => {
 app.post("/api/follow", authMiddleware, (req, res) => {
   const target = users[emailKey(req.body.email)];
   if (!target) return res.status(400).json({ error: "Ese jugador no existe." });
+  if ((target.blockedUsers || []).includes(req.user.email)) {
+    return res.status(403).json({ error: "Esa persona te bloqueó." });
+  }
   const me = req.user;
   if (!me.following) me.following = [];
   if (!me.following.includes(target.email)) me.following.push(target.email);
@@ -567,6 +732,33 @@ app.post("/api/unfollow", authMiddleware, (req, res) => {
   me.following = (me.following || []).filter((e) => e !== emailKey(req.body.email));
   saveUsers(users);
   res.json({ ok: true });
+});
+
+// ---------------- Bloquear a otra persona: ya no puede seguirte, comentar en lo tuyo,
+// ni mandarte mensajes. Si ya te seguía o vos la seguías, se deja de seguir en las dos. ----------------
+app.post("/api/users/:email/block", authMiddleware, (req, res) => {
+  const target = users[emailKey(req.params.email)];
+  if (!target) return res.status(404).json({ error: "Ese usuario no existe." });
+  const me = req.user;
+  if (!me.blockedUsers) me.blockedUsers = [];
+  const already = me.blockedUsers.includes(target.email);
+  if (already) {
+    me.blockedUsers = me.blockedUsers.filter((e) => e !== target.email);
+  } else {
+    me.blockedUsers.push(target.email);
+    me.following = (me.following || []).filter((e) => e !== target.email);
+    target.following = (target.following || []).filter((e) => e !== me.email);
+  }
+  saveUsers(users);
+  res.json({ ok: true, blocked: !already });
+});
+
+app.get("/api/users/blocked/mine", authMiddleware, (req, res) => {
+  const list = (req.user.blockedUsers || []).map((email) => {
+    const u = users[email];
+    return u ? { email: u.email, name: u.name, avatarUrl: u.avatarUrl || "" } : null;
+  }).filter(Boolean);
+  res.json({ blocked: list });
 });
 
 // ---------------- Suscripciones: apoyo mensual a un creador, pagado con Monedas ----------------
@@ -748,8 +940,9 @@ app.post("/api/meetings/schedule", authMiddleware, async (req, res) => {
   scheduled.push(entry);
   saveScheduledMeetings(scheduled);
 
+  const appBaseUrl = req.protocol + "://" + req.get("host");
   for (const email of invitedEmails) {
-    try { await sendMeetingInviteEmail(email, req.user.name, entry.label, entry.scheduledFor, code); }
+    try { await sendMeetingInviteEmail(email, req.user.name, entry.label, entry.scheduledFor, code, appBaseUrl); }
     catch (e) { console.log("Error mandando invitación a " + email + ":", e.message); }
   }
 
@@ -838,7 +1031,7 @@ function maxVideoDurationFor(email) {
     : VIDEO_DURATION_LIMIT_NEW;
 }
 
-function shapePost(p, viewerEmail) {
+function shapePost(p, viewerEmail, viewerUser) {
   return {
     id: p.id,
     authorEmail: p.authorEmail,
@@ -850,6 +1043,9 @@ function shapePost(p, viewerEmail) {
     durationSeconds: p.durationSeconds || null,
     likeCount: (p.likes || []).length,
     likedByMe: viewerEmail ? (p.likes || []).includes(viewerEmail) : false,
+    savedByMe: viewerUser ? (viewerUser.savedPosts || []).includes(p.id) : false,
+    isFollowingAuthor: viewerUser ? (viewerUser.following || []).includes(p.authorEmail) : false,
+    commentsClosed: !!p.commentsClosed,
     comments: p.comments || [],
     viewCount: p.views || 0,
     createdAt: p.createdAt,
@@ -953,14 +1149,14 @@ app.post("/api/posts", authMiddleware, postUpload.single("file"), (req, res) => 
   const posts = loadPosts();
   posts.unshift(post);
   savePosts(posts);
-  res.json({ ok: true, post: shapePost(post, u.email) });
+  res.json({ ok: true, post: shapePost(post, u.email, u) });
 });
 
 app.get("/api/posts", authMiddleware, (req, res) => {
   const posts = loadPosts();
   const followingSet = new Set(req.user.following || []);
   const ranked = rankPostsForYou(posts, req.user.email, followingSet).slice(0, 60);
-  res.json({ posts: ranked.map((p) => shapePost(p, req.user.email)) });
+  res.json({ posts: ranked.map((p) => shapePost(p, req.user.email, req.user)) });
 });
 
 app.post("/api/posts/:id/view", authMiddleware, (req, res) => {
@@ -972,27 +1168,50 @@ app.post("/api/posts/:id/view", authMiddleware, (req, res) => {
   res.json({ ok: true, viewCount: post.views });
 });
 
+app.post("/api/posts/:id/save", authMiddleware, (req, res) => {
+  const posts = loadPosts();
+  const post = posts.find((p) => p.id === req.params.id);
+  if (!post) return res.status(404).json({ error: "Esa publicación ya no existe." });
+  const u = req.user;
+  if (!u.savedPosts) u.savedPosts = [];
+  const already = u.savedPosts.includes(post.id);
+  u.savedPosts = already ? u.savedPosts.filter((id) => id !== post.id) : [...u.savedPosts, post.id];
+  saveUsers(users);
+  res.json({ ok: true, saved: !already });
+});
+
+app.get("/api/posts/saved", authMiddleware, (req, res) => {
+  const savedIds = new Set(req.user.savedPosts || []);
+  const posts = loadPosts().filter((p) => savedIds.has(p.id));
+  res.json({ posts: posts.map((p) => shapePost(p, req.user.email, req.user)) });
+});
+
 app.get("/api/users/:email/profile", authMiddleware, (req, res) => {
   const key = emailKey(req.params.email);
   const user = users[key];
   if (!user) return res.status(404).json({ error: "Ese usuario no existe." });
   const equipped = user.equipped || {};
   const badge = equipped.badge && STORE_ITEMS[equipped.badge] ? STORE_ITEMS[equipped.badge].emoji : null;
+  const followerCount = getFollowerCount(user.email);
+  const gifts = giftStatsFor(user.email);
   res.json({
     name: user.name,
     email: user.email,
     avatarUrl: user.avatarUrl || "",
-    followerCount: getFollowerCount(user.email),
+    followerCount,
     isFollowing: (req.user.following || []).includes(user.email),
+    isBlockedByMe: (req.user.blockedUsers || []).includes(user.email),
     badge,
     frameCssClass: equipped.frame && STORE_ITEMS[equipped.frame] ? STORE_ITEMS[equipped.frame].cssClass : null,
+    level: calculateLevel(gifts.totalReceived, followerCount),
+    gifts,
   });
 });
 
 app.get("/api/posts/user/:email", authMiddleware, (req, res) => {
   const key = emailKey(req.params.email);
   const posts = loadPosts().filter((p) => p.authorEmail === key);
-  res.json({ posts: posts.map((p) => shapePost(p, req.user.email)) });
+  res.json({ posts: posts.map((p) => shapePost(p, req.user.email, req.user)) });
 });
 
 app.post("/api/posts/:id/like", authMiddleware, (req, res) => {
@@ -1012,11 +1231,26 @@ app.post("/api/posts/:id/comment", authMiddleware, (req, res) => {
   const posts = loadPosts();
   const post = posts.find((p) => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: "Esa publicación ya no existe." });
+  if (post.commentsClosed) return res.status(403).json({ error: "El autor cerró los comentarios en esta publicación." });
+  const author = users[post.authorEmail];
+  if (author && (author.blockedUsers || []).includes(req.user.email)) {
+    return res.status(403).json({ error: "No podés comentar en esta publicación." });
+  }
   if (!post.comments) post.comments = [];
-  const comment = { name: req.user.name, text, createdAt: new Date().toISOString() };
+  const comment = { name: req.user.name, email: req.user.email, text, createdAt: new Date().toISOString() };
   post.comments.push(comment);
   savePosts(posts);
   res.json({ ok: true, comment, commentCount: post.comments.length });
+});
+
+app.post("/api/posts/:id/toggle-comments", authMiddleware, (req, res) => {
+  const posts = loadPosts();
+  const post = posts.find((p) => p.id === req.params.id);
+  if (!post) return res.status(404).json({ error: "Esa publicación ya no existe." });
+  if (post.authorEmail !== req.user.email) return res.status(403).json({ error: "Solo el autor puede hacer esto." });
+  post.commentsClosed = !post.commentsClosed;
+  savePosts(posts);
+  res.json({ ok: true, commentsClosed: post.commentsClosed });
 });
 
 // ---------------- Denuncias: publicaciones o usuarios ----------------
@@ -1124,16 +1358,14 @@ app.get("/api/posts/:id/download", authMiddleware, (req, res) => {
 
   const ext = post.type === "video" ? "mp4" : "jpg";
   const outPath = path.join(os.tmpdir(), "tablelive_dl_" + post.id + "_" + Date.now() + "." + ext);
-  const watermarkText = "TableLive - " + sanitizeForFfmpegText(post.authorName);
-  // Usamos nuestra propia fuente (incluida en el proyecto) para que la marca de agua
-  // se vea siempre, sin depender de qué fuentes tenga instaladas el sistema operativo
-  // (en Windows, sin esto, el texto a veces no aparecía).
-  const fontPath = path.join(__dirname, "fonts", "watermark-font.ttf").replace(/\\/g, "/").replace(/:/g, "\\:");
-  const drawtext = "drawtext=fontfile='" + fontPath + "':text='" + watermarkText + "':fontcolor=white@0.9:fontsize=22:box=1:boxcolor=black@0.45:boxborderw=8:x=16:y=h-th-16";
+  // Marca de agua con el logo real de TableLive (ya no es texto) — se superpone chico,
+  // abajo a la izquierda, sin taparle la cara a nadie.
+  const logoPath = path.join(__dirname, "public", "icons", "icon-192.png");
+  const overlayFilter = "[1:v]scale=64:-1[wm];[0:v][wm]overlay=16:H-h-16";
 
   const args = post.type === "video"
-    ? ["-y", "-i", sourcePath, "-vf", drawtext, "-codec:a", "copy", outPath]
-    : ["-y", "-i", sourcePath, "-vf", drawtext, outPath];
+    ? ["-y", "-i", sourcePath, "-i", logoPath, "-filter_complex", overlayFilter, "-codec:a", "copy", outPath]
+    : ["-y", "-i", sourcePath, "-i", logoPath, "-filter_complex", overlayFilter, outPath];
 
   const ffmpegProc = spawn(FFMPEG_PATH, args);
   let stderrLog = "";
@@ -1198,6 +1430,9 @@ app.post("/api/messages/send", authMiddleware, (req, res) => {
   if (!text && !sharedPostId) return res.status(400).json({ error: "Escribí un mensaje." });
   if (!users[to]) return res.status(400).json({ error: "Ese usuario no existe." });
   if (to === req.user.email) return res.status(400).json({ error: "No te podés mandar mensajes a vos mismo." });
+  if ((users[to].blockedUsers || []).includes(req.user.email)) {
+    return res.status(403).json({ error: "No podés mandarle mensajes a esta persona." });
+  }
 
   let sharedPost = null;
   if (sharedPostId) {
@@ -1206,10 +1441,25 @@ app.post("/api/messages/send", authMiddleware, (req, res) => {
   }
 
   const dms = loadDMs();
-  const message = { from: req.user.email, to, text, sharedPost, createdAt: new Date().toISOString() };
+  const message = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    from: req.user.email, to, text, sharedPost, createdAt: new Date().toISOString(),
+  };
   dms.push(message);
   saveDMs(dms);
   res.json({ ok: true, message });
+});
+
+app.post("/api/messages/:id/delete", authMiddleware, (req, res) => {
+  const dms = loadDMs();
+  const msg = dms.find((m) => m.id === req.params.id);
+  if (!msg) return res.status(404).json({ error: "Ese mensaje ya no existe." });
+  if (msg.from !== req.user.email) return res.status(403).json({ error: "Solo podés borrar mensajes que vos mandaste." });
+  msg.text = null;
+  msg.sharedPost = null;
+  msg.deleted = true;
+  saveDMs(dms);
+  res.json({ ok: true });
 });
 
 // ---------------- PayPal: comprar Monedas ----------------
@@ -1263,6 +1513,14 @@ async function sendPaypalPayout(receiverEmail, usdAmount, note) {
 
 app.get("/api/paypal/config", (req, res) => {
   res.json({ clientId: PAYPAL_CLIENT_ID, packs: GEM_PACKS, configured: !!(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET), platformFee: PLATFORM_FEE });
+});
+
+// Liviano a propósito (sin las credenciales de PayPal) para poder cargarlo apenas entra
+// a la app, mucho antes de que alguien necesite mandar un regalo.
+app.get("/api/gift-catalog", (req, res) => {
+  const gifts = Object.entries(GIFT_CATALOG).map(([amount, g]) => ({ amount: parseInt(amount, 10), name: g.name, symbol: g.symbol, battlePoints: g.battlePoints }));
+  gifts.sort((a, b) => a.amount - b.amount);
+  res.json({ gifts });
 });
 
 app.post("/api/paypal/create-order", authMiddleware, async (req, res) => {
@@ -1336,7 +1594,7 @@ app.post("/api/withdraw-request", authMiddleware, (req, res) => {
     requestedAt: new Date().toISOString(),
     status: "pendiente",
   });
-  fs.writeFileSync(WITHDRAWALS_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(WITHDRAWALS_FILE, list);
   res.json({ ok: true, newBalance: user.diamondBalance, payoutAmount, platformCut });
 });
 
@@ -1520,7 +1778,7 @@ app.post("/api/admin/mark-paid", adminOrStaff("parcial"), (req, res) => {
   if (!list[index]) return res.status(400).json({ error: "No encontrado." });
   list[index].status = "pagado";
   list[index].paidAt = new Date().toISOString();
-  fs.writeFileSync(WITHDRAWALS_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(WITHDRAWALS_FILE, list);
   res.json({ ok: true });
 });
 
@@ -1536,7 +1794,7 @@ app.post("/api/admin/reject-withdrawal", adminOrStaff("parcial"), (req, res) => 
   // Le devolvemos los diamantes a la cuenta, ya que el retiro no se va a pagar
   const user = users[w.email];
   if (user) { user.diamondBalance += w.gemsWithdrawn; saveUsers(users); }
-  fs.writeFileSync(WITHDRAWALS_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(WITHDRAWALS_FILE, list);
   res.json({ ok: true });
 });
 
@@ -1560,7 +1818,7 @@ app.post("/api/admin/pay-withdrawal-automatic", adminAuthMiddleware, async (req,
   w.paidAt = new Date().toISOString();
   w.paypalBatchId = result.batchId;
   w.paidAutomatically = true;
-  fs.writeFileSync(WITHDRAWALS_FILE, JSON.stringify(list, null, 2));
+  writeJSONAsync(WITHDRAWALS_FILE, list);
   res.json({ ok: true, batchId: result.batchId });
 });
 
@@ -1593,6 +1851,43 @@ app.post("/api/admin/user/suspend", adminOrStaff("full"), (req, res) => {
   user.suspended = !!suspended;
   saveUsers(users);
   res.json({ ok: true, suspended: user.suspended });
+});
+
+// Bloquear que mande regalos por un tiempo (10 minutos, 1 día, etc.) — más suave que
+// suspender o bloquear la cuenta entera, pensado para moderar sin sacarle el acceso
+// a todo lo demás.
+app.post("/api/admin/user/block-gifts", adminOrStaff("parcial"), (req, res) => {
+  const { email, minutes } = req.body;
+  const user = users[emailKey(email)];
+  if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+  const mins = parseInt(minutes, 10);
+  if (!mins || mins <= 0) {
+    user.giftsBlockedUntil = null; // 0 o vacío = sacarle el bloqueo ahora mismo
+  } else {
+    user.giftsBlockedUntil = Date.now() + mins * 60 * 1000;
+  }
+  saveUsers(users);
+  res.json({ ok: true, giftsBlockedUntil: user.giftsBlockedUntil });
+});
+
+// Perfil completo de un usuario, para el admin — datos bancarios, teléfono, todo lo
+// que no entra en la tabla principal sin que quede desordenada.
+app.get("/api/admin/user/:email/detail", adminOrStaff("limitado"), (req, res) => {
+  const user = users[emailKey(req.params.email)];
+  if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+  res.json({
+    name: user.name, legalName: user.legalName, email: user.email, phone: user.phone, country: user.country,
+    avatarUrl: user.avatarUrl || "", paypalEmail: user.paypalEmail,
+    bankName: user.bankName, bankAccountNumber: user.bankAccountNumber, bankAccountHolder: user.bankAccountHolder,
+    coinBalance: user.coinBalance, diamondBalance: user.diamondBalance,
+    followerCount: getFollowerCount(user.email), followingCount: (user.following || []).length,
+    createdAt: user.createdAt, emailVerified: !!user.emailVerified,
+    monetizationStatus: user.monetization ? user.monetization.status : "no_solicitado",
+    banned: !!user.banned, suspended: !!user.suspended, blocked: !!user.blocked,
+    isPlatformOwner: !!user.isPlatformOwner,
+    giftsBlockedUntil: user.giftsBlockedUntil || null,
+    staffRole: user.staffRole || null,
+  });
 });
 
 // Bloquear: más definitivo que suspender, para casos graves
@@ -1717,8 +2012,33 @@ app.post("/api/support/send", authMiddleware, (req, res) => {
     message: cleanMessage.slice(0, 3000),
     createdAt: new Date().toISOString(),
     status: "abierto", // abierto | resuelto
+    replies: [],
   };
   messages.push(entry);
+  saveSupportMessages(messages);
+  res.json({ ok: true });
+});
+
+// La persona ve sus propios mensajes de soporte, con las respuestas que le fueron
+// llegando, y puede seguir escribiendo en el mismo hilo — no queda restringido a un
+// solo mensaje sin poder seguir la conversación.
+app.get("/api/support/mine", authMiddleware, (req, res) => {
+  const messages = loadSupportMessages()
+    .filter((m) => m.email === req.user.email)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  res.json({ messages });
+});
+
+app.post("/api/support/:id/reply", authMiddleware, (req, res) => {
+  const messages = loadSupportMessages();
+  const m = messages.find((x) => x.id === req.params.id);
+  if (!m) return res.status(404).json({ error: "Ese mensaje ya no existe." });
+  if (m.email !== req.user.email) return res.status(403).json({ error: "No podés responder acá." });
+  const text = (req.body.text || "").trim().slice(0, 2000);
+  if (!text) return res.status(400).json({ error: "Escribí algo antes de mandar." });
+  if (!m.replies) m.replies = [];
+  m.replies.push({ from: "user", text, byName: req.user.name, createdAt: new Date().toISOString() });
+  m.status = "abierto"; // si la persona vuelve a escribir, se reabre para que el equipo lo vea
   saveSupportMessages(messages);
   res.json({ ok: true });
 });
@@ -1726,6 +2046,19 @@ app.post("/api/support/send", authMiddleware, (req, res) => {
 app.get("/api/admin/support", adminOrStaff("limitado"), (req, res) => {
   const messages = loadSupportMessages().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   res.json({ messages });
+});
+
+app.post("/api/admin/support/reply", adminOrStaff("parcial"), (req, res) => {
+  const messages = loadSupportMessages();
+  const m = messages.find((x) => x.id === req.body.id);
+  if (!m) return res.status(404).json({ error: "No encontrado." });
+  const text = (req.body.text || "").trim().slice(0, 2000);
+  if (!text) return res.status(400).json({ error: "Escribí algo antes de mandar." });
+  if (!m.replies) m.replies = [];
+  const byName = req.staffUser ? req.staffUser.name : "Soporte de TableLive";
+  m.replies.push({ from: "admin", text, byName, createdAt: new Date().toISOString() });
+  saveSupportMessages(messages);
+  res.json({ ok: true });
 });
 
 app.post("/api/admin/support/resolve", adminOrStaff("parcial"), (req, res) => {
@@ -1737,6 +2070,7 @@ app.post("/api/admin/support/resolve", adminOrStaff("parcial"), (req, res) => {
   saveSupportMessages(messages);
   res.json({ ok: true });
 });
+
 
 app.get("/api/admin/meeting-plans", adminOrStaff("limitado"), (req, res) => {
   res.json({ plans: loadMeetingPlans() });
@@ -1865,7 +2199,7 @@ function loadMeetingPlans() {
   try { return JSON.parse(fs.readFileSync(MEETING_PLANS_FILE, "utf8")); } catch (e) { return { ...DEFAULT_MEETING_PLANS }; }
 }
 function saveMeetingPlans(plans) {
-  fs.writeFileSync(MEETING_PLANS_FILE, JSON.stringify(plans, null, 2));
+  writeJSONAsync(MEETING_PLANS_FILE, plans);
 }
 
 function makeMeetingCode() {
@@ -1902,6 +2236,7 @@ function publicBattleFor(room) {
     startedAt: b.startedAt,
     durationSeconds: b.durationSeconds,
     ended: !!b.ended,
+    autoRematchMinutes: b.autoRematchMinutes || null,
   };
 }
 
@@ -1922,6 +2257,7 @@ function publicState(room) {
     })),
     queue: room.queue.map((q) => q.name),
     spectatorCount: room.spectators ? room.spectators.size : 0,
+    spectatorsList: room.spectatorInfo ? Array.from(room.spectatorInfo.values()).slice(0, 100) : [],
     boneyardCount: room.boneyard ? room.boneyard.length : 0,
     likes: room.likes || {},
     comments: room.comments || [],
@@ -1937,15 +2273,18 @@ function publicState(room) {
     })),
     featuredEmail: room.featuredEmail || null,
     guestsOpen: !!room.guestsOpen,
+    guestsLimit: room.guestsLimit || 10,
+    commentsClosed: !!room.commentsClosed,
   };
 }
 
-function startBattle(roomA, roomB, durationSeconds) {
+function startBattle(roomA, roomB, durationSeconds, autoRematchMinutes) {
   const id = "battle_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
   const battle = {
     id, roomA: roomA.code, roomB: roomB.code, scoreA: 0, scoreB: 0,
     giftersA: {}, giftersB: {}, // email -> total regalado de ese lado (para la espada del que más regala)
     startedAt: Date.now(), durationSeconds, ended: false, timeout: null,
+    autoRematchMinutes: autoRematchMinutes || null,
   };
   battles[id] = battle;
   roomA.activeBattleId = id;
@@ -1979,6 +2318,19 @@ function endBattle(id) {
     delete battles[id];
     if (rooms[b.roomA]) { rooms[b.roomA].activeBattleId = null; broadcastState(rooms[b.roomA]); }
     if (rooms[b.roomB]) { rooms[b.roomB].activeBattleId = null; broadcastState(rooms[b.roomB]); }
+
+    // Relanzamiento automático: si quien desafió eligió que se repita sola después de
+    // X minutos, la programamos acá — pero solo si las dos transmisiones siguen en
+    // vivo y ninguna quedó ocupada en otra batalla mientras tanto.
+    if (b.autoRematchMinutes) {
+      setTimeout(() => {
+        const freshA = rooms[b.roomA];
+        const freshB = rooms[b.roomB];
+        if (!freshA || !freshB) return; // alguna de las dos ya no está en vivo
+        if (freshA.activeBattleId || freshB.activeBattleId) return; // ya está ocupada en otra batalla
+        startBattle(freshA, freshB, b.durationSeconds, b.autoRematchMinutes);
+      }, b.autoRematchMinutes * 60 * 1000);
+    }
   }, 8000);
 }
 
@@ -2322,13 +2674,29 @@ io.on("connection", (socket) => {
     let code = makeRoomCode();
     while (rooms[code]) code = makeRoomCode();
     rooms[code] = {
-      code, capacity: cap, handSize: size, seats: emptySeats(cap), queue: [], spectators: new Set(),
+      code, capacity: cap, handSize: size, seats: emptySeats(cap), queue: [], spectators: new Set(), spectatorInfo: new Map(),
       started: false, finished: false, winner: null, board: [], boneyard: [],
       leftEnd: null, rightEnd: null, turnIndex: 0, passCount: 0,
       likes: {}, comments: [], liveStartedAt: Date.now(),
       mutedNames: [], bannedNames: [],
     };
     assignSeat(socket, rooms[code]);
+
+    // Avisamos a los seguidores de este anfitrión (los que están conectados en este
+    // momento) que se puso en vivo — como el aviso de "está en vivo" que pediste.
+    const hostEmail = socket.data.userEmail;
+    if (hostEmail) {
+      const followers = new Set(getFollowersList(hostEmail));
+      if (followers.size) {
+        const hostName = displayNameFor(socket);
+        const hostUser = users[hostEmail];
+        for (const [, s] of io.sockets.sockets) {
+          if (s.data.userEmail && followers.has(s.data.userEmail)) {
+            s.emit("followedUserWentLive", { hostName, hostEmail, hostAvatar: hostUser ? hostUser.avatarUrl || "" : "", code });
+          }
+        }
+      }
+    }
   });
 
   socket.on("joinRoom", ({ code }) => {
@@ -2346,12 +2714,13 @@ io.on("connection", (socket) => {
     if (!room) { socket.emit("errorMsg", "No estás mirando ninguna sala."); return; }
     if (!socket.data.isSpectator) return; // ya tiene asiento o ya está en la fila
     room.spectators.delete(socket.id);
+    if (room.spectatorInfo) room.spectatorInfo.delete(socket.id);
     socket.data.isSpectator = false;
     assignSeat(socket, room);
   });
 
   // ---------------- Batallas LIVE: dos transmisiones compiten por regalos ----------------
-  socket.on("inviteBattle", ({ targetCode, durationSeconds }) => {
+  socket.on("inviteBattle", ({ targetCode, durationSeconds, autoRematchMinutes }) => {
     if (!requireAuth(socket)) return;
     const room = rooms[socket.data.roomCode];
     if (!room) { socket.emit("errorMsg", "Tenés que estar en una sala para invitar a batalla."); return; }
@@ -2361,9 +2730,10 @@ io.on("connection", (socket) => {
     if (room.activeBattleId) { socket.emit("errorMsg", "Tu transmisión ya está en una batalla."); return; }
     if (target.activeBattleId) { socket.emit("errorMsg", "Esa transmisión ya está en otra batalla."); return; }
     const dur = [60, 120, 180, 300].includes(durationSeconds) ? durationSeconds : 180;
+    const rematch = [1, 2, 3, 5, 10].includes(autoRematchMinutes) ? autoRematchMinutes : null;
     const fromName = displayNameFor(socket);
-    pendingBattleInvites[target.code] = { fromCode: room.code, fromName, durationSeconds: dur, expiresAt: Date.now() + 30000 };
-    io.to(target.code).emit("battleInvited", { fromCode: room.code, fromName, durationSeconds: dur });
+    pendingBattleInvites[target.code] = { fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch, expiresAt: Date.now() + 30000 };
+    io.to(target.code).emit("battleInvited", { fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch });
     socket.emit("battleInviteSent", { targetCode: target.code });
   });
 
@@ -2384,7 +2754,7 @@ io.on("connection", (socket) => {
       socket.emit("errorMsg", "Una de las dos transmisiones ya está en otra batalla.");
       return;
     }
-    startBattle(challenger, room, invite.durationSeconds);
+    startBattle(challenger, room, invite.durationSeconds, invite.autoRematchMinutes);
   });
 
   // Cualquiera puede mirar en vivo, sin necesitar cuenta
@@ -2403,6 +2773,7 @@ io.on("connection", (socket) => {
       const prevRoom = rooms[socket.data.roomCode];
       if (prevRoom) {
         prevRoom.spectators.delete(socket.id);
+        if (prevRoom.spectatorInfo) prevRoom.spectatorInfo.delete(socket.id);
         socket.leave(prevRoom.code);
         broadcastState(prevRoom);
       }
@@ -2411,6 +2782,7 @@ io.on("connection", (socket) => {
     socket.data.isSpectator = true;
     socket.data.spectatorName = (name || "Espectador").slice(0, 18);
     room.spectators.add(socket.id);
+    room.spectatorInfo.set(socket.id, { name: spectatorDisplayName, email: socket.data.userEmail || null });
     socket.join(room.code);
     socket.emit("spectating", { code: room.code });
     broadcastState(room);
@@ -2469,7 +2841,7 @@ io.on("connection", (socket) => {
     room.cameraRequests = (room.cameraRequests || []).filter((r) => r.name !== name);
     if (approve) {
       if (!room.cameraGuests) room.cameraGuests = [];
-      if (room.cameraGuests.length >= 10) return;
+      if (room.cameraGuests.length >= (room.guestsLimit || 10)) return;
       room.cameraGuests.push({ name, email: request ? request.email : null });
       // Le avisamos directo a esa persona que la aceptaron, para que se conecte sola
       // (con o sin cámara, según lo que ella haya pedido) sin tener que hacer nada más.
@@ -2549,7 +2921,7 @@ io.on("connection", (socket) => {
 
   // El anfitrión decide cuándo abrir su transmisión para que la gente pueda pedir TableUp.
   // Mientras esté cerrado, nadie ve las ventanillas — no es algo que quede siempre puesto.
-  socket.on("toggleGuestsOpen", ({ open }) => {
+  socket.on("toggleGuestsOpen", ({ open, limit }) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
@@ -2557,6 +2929,10 @@ io.on("connection", (socket) => {
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     room.guestsOpen = !!open;
+    if (limit !== undefined) {
+      const n = parseInt(limit, 10);
+      if (n >= 1 && n <= 10) room.guestsLimit = n;
+    }
     broadcastState(room);
   });
 
@@ -2614,6 +2990,7 @@ io.on("connection", (socket) => {
           s.emit("kickedEvent", { roomCode: room.code });
           s.leave(room.code);
           room.spectators.delete(s.id);
+          if (room.spectatorInfo) room.spectatorInfo.delete(s.id);
         }
       });
       broadcastState(room);
@@ -2651,14 +3028,36 @@ io.on("connection", (socket) => {
       socket.emit("errorMsg", "Un moderador te silenció en esta transmisión.");
       return;
     }
+    if (room.commentsClosed) {
+      socket.emit("errorMsg", "El anfitrión cerró los comentarios en esta transmisión.");
+      return;
+    }
+    const hostSeat = room.seats.find((s) => s.name);
+    const hostUser = hostSeat && hostSeat.email ? users[hostSeat.email] : null;
+    if (hostUser && socket.data.userEmail && (hostUser.blockedUsers || []).includes(socket.data.userEmail)) {
+      socket.emit("errorMsg", "No podés comentar en esta transmisión.");
+      return;
+    }
     const u = socket.data.userEmail ? users[socket.data.userEmail] : null;
     const equipped = (u && u.equipped) || {};
     const badge = equipped.badge && STORE_ITEMS[equipped.badge] ? STORE_ITEMS[equipped.badge].emoji : null;
     const nameColor = equipped.color && STORE_ITEMS[equipped.color] ? STORE_ITEMS[equipped.color].value : null;
-    const comment = { name: senderName, text: clean, ts: Date.now(), badge, nameColor };
+    const comment = { name: senderName, text: clean, ts: Date.now(), badge, nameColor, email: socket.data.userEmail || null };
     room.comments.push(comment);
     if (room.comments.length > 50) room.comments.shift();
     io.to(room.code).emit("commentEvent", comment);
+  });
+
+  // El anfitrión (o admin del live) puede cerrar los comentarios para que nadie pueda escribir
+  socket.on("toggleCommentsClosed", ({ closed }) => {
+    const room = rooms[socket.data.roomCode];
+    if (!room) return;
+    const myDisplayName = displayNameFor(socket);
+    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
+    if (!isPlayer && !isLiveAdmin) return;
+    room.commentsClosed = !!closed;
+    broadcastState(room);
   });
 
   socket.on("getBalance", () => {
@@ -2678,6 +3077,11 @@ io.on("connection", (socket) => {
     const sender = users[socket.data.userEmail];
     const receiver = users[toSeat.email];
     if (!sender || !receiver) return;
+    if (sender.giftsBlockedUntil && sender.giftsBlockedUntil > Date.now()) {
+      const minsLeft = Math.ceil((sender.giftsBlockedUntil - Date.now()) / 60000);
+      socket.emit("giftError", "Un administrador te restringió mandar regalos por " + minsLeft + " minuto" + (minsLeft === 1 ? "" : "s") + " más.");
+      return;
+    }
     if (sender.coinBalance < amt) { socket.emit("giftError", "No te alcanzan las monedas."); return; }
     sender.coinBalance -= amt;
     receiver.diamondBalance += amt;
@@ -2692,14 +3096,17 @@ io.on("connection", (socket) => {
     }
     io.to(room.code).emit("giftEvent", { from: sender.name, to: receiver.name, amount: amt });
 
-    // Si la sala está en una batalla LIVE, este regalo suma puntos para este lado
+    // Si la sala está en una batalla LIVE, este regalo suma puntos para este lado —
+    // los puntos NO son iguales a las monedas: cada regalo del catálogo vale su propio
+    // puntaje (los caros valen desproporcionadamente más, para que se note en el marcador).
     if (room.activeBattleId) {
       const b = battles[room.activeBattleId];
       if (b && !b.ended) {
+        const battlePoints = battlePointsForGift(amt);
         const gifters = b.roomA === room.code ? b.giftersA : b.giftersB;
-        gifters[sender.email] = (gifters[sender.email] || 0) + amt;
-        if (b.roomA === room.code) b.scoreA += amt;
-        else if (b.roomB === room.code) b.scoreB += amt;
+        gifters[sender.email] = (gifters[sender.email] || 0) + battlePoints;
+        if (b.roomA === room.code) b.scoreA += battlePoints;
+        else if (b.roomB === room.code) b.scoreB += battlePoints;
         broadcastState(room);
         const otherCode = b.roomA === room.code ? b.roomB : b.roomA;
         if (rooms[otherCode]) broadcastState(rooms[otherCode]);
@@ -2890,6 +3297,7 @@ io.on("connection", (socket) => {
 
     if (socket.data.isSpectator) {
       room.spectators.delete(socket.id);
+    if (room.spectatorInfo) room.spectatorInfo.delete(socket.id);
       broadcastState(room);
       return;
     }

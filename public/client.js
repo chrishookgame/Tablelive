@@ -13,6 +13,22 @@
   setTimeout(hideSplash, 2800);
 })();
 
+// ---------------- Cartel chico de "Reconectando..." (no te saca de la cuenta) ----------------
+let connectionBannerTimeout = null;
+function showConnectionBanner(text) {
+  const el = document.getElementById("connection-banner");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("hidden");
+  clearTimeout(connectionBannerTimeout);
+}
+function hideConnectionBanner() {
+  const el = document.getElementById("connection-banner");
+  if (!el) return;
+  clearTimeout(connectionBannerTimeout);
+  connectionBannerTimeout = setTimeout(() => el.classList.add("hidden"), 400);
+}
+
 let socket = null;
 let authToken = localStorage.getItem("domino_token");
 let myName = localStorage.getItem("domino_display_name") || "";
@@ -73,11 +89,50 @@ document.getElementById("send-support-btn").addEventListener("click", async () =
     msgEl.textContent = "¡Listo! Tu mensaje le llegó al equipo de soporte.";
     document.getElementById("support-subject").value = "";
     document.getElementById("support-message").value = "";
+    loadMySupportThreads();
   } catch (e) {
     msgEl.style.color = "#ff8a80";
     msgEl.textContent = "Error de conexión.";
   }
 });
+
+async function loadMySupportThreads() {
+  const wrap = document.getElementById("my-support-threads");
+  if (!wrap) return;
+  try {
+    const res = await fetch("/api/support/mine", { headers: { Authorization: "Bearer " + authToken } });
+    const data = await res.json();
+    if (!data.messages.length) { wrap.innerHTML = '<p class="empty-msg-small">Todavía no le escribiste a soporte.</p>'; return; }
+    wrap.innerHTML = data.messages.map((m) => {
+      const repliesHtml = (m.replies || []).map((r) =>
+        `<div class="support-reply-row ${r.from === 'admin' ? 'support-reply-admin' : ''}">
+          <b>${r.from === 'admin' ? '🛡️ ' + escapeHtml(r.byName) : 'Vos'}</b>
+          <p>${escapeHtml(r.text)}</p>
+        </div>`
+      ).join("");
+      return `<div class="support-thread-card">
+        <p class="support-thread-subject">${escapeHtml(m.subject)} <span class="badge-${m.status === 'resuelto' ? 'pagado' : 'pendiente'}" style="font-size:10px;">${m.status}</span></p>
+        <p class="support-thread-message">${escapeHtml(m.message)}</p>
+        ${repliesHtml}
+        <div style="display:flex;gap:4px;margin-top:8px;">
+          <input type="text" placeholder="Escribir..." id="my-reply-${m.id}" style="flex:1;margin:0;font-size:12px;" />
+          <button class="mini-btn-inline" onclick="sendMySupportReply('${m.id}')">Enviar</button>
+        </div>
+      </div>`;
+    }).join("");
+  } catch (e) {}
+}
+
+async function sendMySupportReply(id) {
+  const input = document.getElementById("my-reply-" + id);
+  const text = input.value.trim();
+  if (!text) return;
+  await fetch("/api/support/" + id + "/reply", {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + authToken },
+    body: JSON.stringify({ text }),
+  });
+  loadMySupportThreads();
+}
 document.getElementById("go-to-admin-btn").addEventListener("click", () => {
   window.open("/admin.html", "_blank");
 });
@@ -120,6 +175,7 @@ document.getElementById("reg-country").addEventListener("change", (e) => {
 
 const urlParams = new URLSearchParams(location.search);
 let watchCode = urlParams.get("watch");
+const joinMeetingCodeFromLink = urlParams.get("joinMeeting");
 
 const authEl = document.getElementById("auth");
 const lobbyEl = document.getElementById("lobby");
@@ -145,6 +201,7 @@ function updateModeratorStatus() {
 }
 let myHand = [];
 let latestState = null;
+let latestSpectatorsList = [];
 let liveTimerInterval = null;
 let liveTimerStartedFor = null;
 
@@ -275,6 +332,62 @@ document.getElementById("login-btn").addEventListener("click", async () => {
   }
 });
 
+// ---------------- Recuperar contraseña olvidada ----------------
+document.getElementById("forgot-password-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("forgot-email").value = document.getElementById("login-email").value.trim();
+  document.getElementById("forgot-step-email").classList.remove("hidden");
+  document.getElementById("forgot-step-code").classList.add("hidden");
+  document.getElementById("forgot-password-msg").textContent = "";
+  document.getElementById("forgot-password-modal").classList.remove("hidden");
+});
+document.getElementById("close-forgot-password-modal").addEventListener("click", () => {
+  document.getElementById("forgot-password-modal").classList.add("hidden");
+});
+document.getElementById("send-reset-code-btn").addEventListener("click", async () => {
+  const email = document.getElementById("forgot-email").value.trim();
+  const msg = document.getElementById("forgot-password-msg");
+  if (!email) { msg.textContent = "Poné tu email."; return; }
+  msg.style.color = "#cfe3da";
+  msg.textContent = "Mandando el código...";
+  try {
+    await fetch("/api/forgot-password", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    msg.style.color = "#8fd4a8";
+    msg.textContent = "Si ese email está registrado, te llegó un código. Revisá tu bandeja (y spam).";
+    document.getElementById("forgot-step-email").classList.add("hidden");
+    document.getElementById("forgot-step-code").classList.remove("hidden");
+  } catch (e) {
+    msg.style.color = "#ff8a80";
+    msg.textContent = "Error de conexión.";
+  }
+});
+document.getElementById("confirm-reset-btn").addEventListener("click", async () => {
+  const email = document.getElementById("forgot-email").value.trim();
+  const code = document.getElementById("reset-code").value.trim();
+  const newPassword = document.getElementById("reset-new-password").value;
+  const msg = document.getElementById("forgot-password-msg");
+  if (!code || !newPassword) { msg.style.color = "#ff8a80"; msg.textContent = "Completá el código y la contraseña nueva."; return; }
+  try {
+    const res = await fetch("/api/reset-password", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) { msg.style.color = "#ff8a80"; msg.textContent = data.error; return; }
+    msg.style.color = "#8fd4a8";
+    msg.textContent = "¡Contraseña cambiada! Ya podés iniciar sesión con la nueva.";
+    document.getElementById("login-email").value = email;
+    document.getElementById("login-password").value = "";
+    setTimeout(() => document.getElementById("forgot-password-modal").classList.add("hidden"), 1800);
+  } catch (e) {
+    msg.style.color = "#ff8a80";
+    msg.textContent = "Error de conexión.";
+  }
+});
+
 function onAuthSuccess(token, name, coinBalance, diamondBalance, emailVerified) {
   authToken = token;
   myName = name;
@@ -342,6 +455,25 @@ function showLobby() {
   loadFollowing();
   loadProfile();
   loadLiveRooms();
+  loadGiftCatalog();
+  if (joinMeetingCodeFromLink) {
+    // Vino de un enlace de invitación por email — lo mandamos directo a la reunión,
+    // sin que tenga que copiar el código a mano.
+    showToast("Entrando a la reunión...");
+    socket.emit("joinMeeting", { code: joinMeetingCodeFromLink.toUpperCase() });
+    history.replaceState(null, "", "/"); // sacamos el código de la URL, ya no hace falta
+  } else if (!urlParams.get("openSearch")) {
+    openFeedSwipeMode(); // arranca directo con el feed a pantalla completa, como TikTok
+  }
+}
+
+let giftCatalogCache = null;
+async function loadGiftCatalog() {
+  try {
+    const res = await fetch("/api/gift-catalog");
+    const data = await res.json();
+    giftCatalogCache = data.gifts;
+  } catch (e) { giftCatalogCache = null; }
 }
 
 document.getElementById("logout-link").addEventListener("click", (e) => {
@@ -370,7 +502,6 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach((b) => {
 
 function openDominoModal() { document.getElementById("domino-modal").classList.remove("hidden"); }
 function closeDominoModal() { document.getElementById("domino-modal").classList.add("hidden"); }
-document.getElementById("domino-fab-btn").addEventListener("click", openDominoModal);
 document.getElementById("close-domino-modal").addEventListener("click", closeDominoModal);
 
 // =====================================================================
@@ -392,21 +523,95 @@ document.querySelectorAll(".feed-switch-btn").forEach((btn) => {
 // Entrar a "Para ti" abre directo la primera publicación a pantalla completa, y se
 // desliza (arriba/abajo, con el dedo o con la rueda del mouse) para ver la siguiente,
 // igual que en TikTok — en vez de mostrar una grilla de miniaturas para tocar.
+// Además mezcla los "en vivo" que haya en ese momento adentro del mismo scroll,
+// como hace TikTok, en vez de tenerlos en una pestaña aparte y separada.
 async function openFeedSwipeMode() {
   const wrap = document.getElementById("feed-videos-view");
   try {
-    const res = await fetch("/api/posts", { headers: { Authorization: "Bearer " + authToken } });
-    const data = await res.json();
-    lastLoadedPosts = data.posts || [];
-    if (!lastLoadedPosts.length) {
+    const [postsRes, liveRes] = await Promise.all([
+      fetch("/api/posts", { headers: { Authorization: "Bearer " + authToken } }),
+      fetch("/api/live-rooms").catch(() => null),
+    ]);
+    const postsData = await postsRes.json();
+    const posts = postsData.posts || [];
+    let liveItems = [];
+    if (liveRes && liveRes.ok) {
+      const liveData = await liveRes.json();
+      liveItems = (liveData.rooms || []).map((r) => ({ isLive: true, ...r }));
+    }
+    // Los en vivo van intercalados cada 4 publicaciones (no todos amontonados al
+    // principio), para que se sientan mezclados de verdad y no como una lista aparte.
+    const combined = [];
+    let liveIdx = 0;
+    posts.forEach((p, i) => {
+      combined.push(p);
+      if (i > 0 && i % 4 === 0 && liveIdx < liveItems.length) combined.push(liveItems[liveIdx++]);
+    });
+    while (liveIdx < liveItems.length) combined.push(liveItems[liveIdx++]);
+    if (!combined.length) {
       wrap.innerHTML = '<p class="empty-msg-small" style="text-align:center;padding:20px;">Todavía no hay publicaciones. ¡Subí la primera con el botón ➕!</p>';
       return;
     }
+    lastLoadedPosts = combined;
     wrap.innerHTML = "";
-    openPostViewer(lastLoadedPosts[0], lastLoadedPosts, 0);
+    openPostViewer(combined[0], combined, 0);
   } catch (e) {
     wrap.innerHTML = '<p class="empty-msg-small">Error cargando videos.</p>';
   }
+}
+
+// Pone el nombre, el estado del mic, la insignia de "Anfitrión" y los botones (destacar,
+// silenciar, bajar, seguir) directo ENCIMA de cada video — así todo queda junto en el
+// mismo cuadro, en vez de tener el video arriba y la info aparte abajo.
+function updateVideoTileOverlays(state, hostSeat, people) {
+  document.querySelectorAll("#video-bar .video-tile").forEach((tile) => {
+    let overlay = tile.querySelector(".tile-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "tile-overlay";
+      tile.appendChild(overlay);
+    }
+    const email = tile.dataset.email;
+    if (!email) { overlay.innerHTML = ""; return; }
+    const person = people.find((p) => p.email === email);
+    const isHost = hostSeat && hostSeat.email === email;
+    if (!person && !isHost) { overlay.innerHTML = ""; return; }
+    const name = isHost ? (hostSeat.name || "Anfitrión") : person.name;
+    const isFeatured = state.featuredEmail === email;
+    const hostBadge = isHost ? `<span class="tile-host-badge">Anfitrión</span>` : "";
+    const featureBtn = amIModerator
+      ? `<button class="tile-icon-btn ${isFeatured ? "active" : ""}" data-feature-email="${escapeHtml(email)}" title="Destacar en pantalla grande">📌</button>`
+      : "";
+    const muteBtn = amIModerator && person && person.isGuest
+      ? `<button class="tile-icon-btn" data-mute-email="${escapeHtml(email)}" title="Silenciar">🔇</button>`
+      : "";
+    const removeBtn = amIModerator && person && person.isGuest
+      ? `<button class="tile-icon-btn tile-icon-danger" data-remove-email="${escapeHtml(email)}" title="Bajar de cámara">✖️</button>`
+      : "";
+    overlay.innerHTML = `
+      ${hostBadge}
+      <div class="tile-controls-row">${featureBtn}${muteBtn}${removeBtn}</div>
+      <div class="tile-name-row"><span class="tile-name">${escapeHtml(name)}</span></div>
+    `;
+    overlay.querySelectorAll("[data-feature-email]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      socket.emit("setFeaturedParticipant", { email: isFeatured ? null : email });
+    }));
+    overlay.querySelectorAll("[data-mute-email]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      socket.emit("muteCameraGuest", { email });
+      showToast("Le pediste a esa persona que se silencie.");
+    }));
+    overlay.querySelectorAll("[data-remove-email]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!confirm("¿Bajar a esta persona de cámara?")) return;
+      socket.emit("removeCameraGuest", { email });
+    }));
+    overlay.querySelector(".tile-name-row").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openUserProfile(email);
+    });
+  });
 }
 
 const MAX_VISIBLE_CAMERA_SLOTS = 10;
@@ -416,13 +621,32 @@ function renderOnCameraStrip(state, hostSeat) {
   const others = state.seats.filter((s) => s.name && s !== hostSeat && s.email).map((s) => ({ ...s, isGuest: false }));
   const guests = (state.cameraGuests || []).map((g) => ({ ...g, isGuest: true }));
   const people = [...others, ...guests].filter((p) => p.email);
+  updateVideoTileOverlays(state, hostSeat, people);
 
   // El interruptor para abrir/cerrar las ventanillas solo lo ve el anfitrión (o admin del live)
   const toggleBtn = document.getElementById("toggle-guests-open-btn");
+  const limitSelect = document.getElementById("guests-limit-select");
   if (toggleBtn) {
     toggleBtn.classList.toggle("hidden", !amIModerator);
     toggleBtn.textContent = state.guestsOpen ? "🔓 Cerrar ventanillas de invitados" : "🔒 Abrir para invitados";
     toggleBtn.classList.toggle("guests-open-active", !!state.guestsOpen);
+  }
+  if (limitSelect) {
+    limitSelect.classList.toggle("hidden", !amIModerator);
+    if (document.activeElement !== limitSelect) limitSelect.value = String(state.guestsLimit || 10);
+  }
+  const commentsToggleBtn = document.getElementById("toggle-comments-closed-btn");
+  if (commentsToggleBtn) {
+    commentsToggleBtn.classList.toggle("hidden", !amIModerator);
+    commentsToggleBtn.textContent = state.commentsClosed ? "💬 Abrir comentarios de nuevo" : "💬 Cerrar comentarios";
+    commentsToggleBtn.classList.toggle("comments-closed-active", !!state.commentsClosed);
+  }
+  const chatInputEl = document.getElementById("chat-input");
+  if (chatInputEl) {
+    if (!chatInputEl.dataset.defaultPlaceholder) chatInputEl.dataset.defaultPlaceholder = chatInputEl.placeholder;
+    const iAmBlockedFromChat = !!state.commentsClosed && !amIModerator;
+    chatInputEl.disabled = iAmBlockedFromChat;
+    chatInputEl.placeholder = iAmBlockedFromChat ? "El anfitrión cerró los comentarios" : chatInputEl.dataset.defaultPlaceholder;
   }
 
   const peopleHtml = people.map((p) => {
@@ -444,7 +668,8 @@ function renderOnCameraStrip(state, hostSeat) {
   }).join("");
 
   // Ventanillas abiertas: solo aparecen si el anfitrión las abrió — no quedan siempre puestas.
-  const openSlots = Math.max(0, MAX_VISIBLE_CAMERA_SLOTS - people.length);
+  const guestsLimit = state.guestsLimit || 10;
+  const openSlots = Math.max(0, guestsLimit - people.length);
   const openSlotsHtml = state.guestsOpen && mySeatIndex === null && authToken
     ? Array.from({ length: openSlots }).map(() => `<div class="on-camera-pill open-slot-pill" data-open-slot="1">+ TableUp</div>`).join("")
     : "";
@@ -523,11 +748,32 @@ async function openUserProfile(email) {
     const badgeHtml = profile.badge ? profile.badge + " " : "";
     document.getElementById("up-name").textContent = badgeHtml + profile.name;
     document.getElementById("up-followers").textContent = profile.followerCount + " seguidores";
+    document.getElementById("up-level-badge").textContent = "⭐ Nivel " + (profile.level || 1);
+
+    const giftsGallery = document.getElementById("up-gifts-gallery");
+    if (profile.gifts && profile.gifts.giftCount > 0) {
+      giftsGallery.classList.remove("hidden");
+      document.getElementById("up-gifts-total").textContent = "💎 " + profile.gifts.totalReceived + " diamantes recibidos en total (" + profile.gifts.giftCount + " regalos)";
+      document.getElementById("up-gifts-top-list").innerHTML = profile.gifts.topGifters.map((g) =>
+        `<div class="up-gift-row"><span>${escapeHtml(g.name)}</span><span>💎 ${g.amount}</span></div>`
+      ).join("");
+    } else {
+      giftsGallery.classList.add("hidden");
+    }
 
     const followBtn = document.getElementById("up-follow-btn");
+    const blockBtn = document.getElementById("up-block-btn");
     const isMe = profile.email === myEmail;
     document.getElementById("up-actions").classList.toggle("hidden", isMe);
     if (!isMe) {
+      blockBtn.textContent = profile.isBlockedByMe ? "✅ Desbloquear" : "🚫 Bloquear";
+      blockBtn.onclick = async () => {
+        if (!profile.isBlockedByMe && !confirm("¿Bloquear a " + profile.name + "? No va a poder seguirte, comentar en lo tuyo, ni mandarte mensajes.")) return;
+        await fetch("/api/users/" + encodeURIComponent(profile.email) + "/block", {
+          method: "POST", headers: { Authorization: "Bearer " + authToken },
+        });
+        openUserProfile(email); // refresca para actualizar el botón
+      };
       followBtn.textContent = profile.isFollowing ? "Dejar de seguir" : "Seguir";
       followBtn.onclick = async () => {
         await fetch("/api/" + (profile.isFollowing ? "unfollow" : "follow"), {
@@ -565,6 +811,33 @@ async function openUserProfile(email) {
 }
 document.getElementById("close-user-profile").addEventListener("click", () => {
   document.getElementById("user-profile-modal").classList.add("hidden");
+});
+
+// ---------------- Quién está mirando (como TikTok: tocás el contador y ves la lista) ----------------
+document.getElementById("spectator-count").addEventListener("click", () => {
+  const wrap = document.getElementById("viewers-list-content");
+  if (!latestSpectatorsList.length) {
+    wrap.innerHTML = '<p class="empty-msg-small">Todavía no hay nadie mirando.</p>';
+  } else {
+    wrap.innerHTML = latestSpectatorsList.map((v) => {
+      const initial = (v.name || "?").trim().charAt(0).toUpperCase();
+      const clickable = v.email ? ` data-open-profile="${escapeHtml(v.email)}"` : "";
+      return `<div class="viewer-row"${clickable}>
+        <span class="viewer-row-avatar" style="background:${colorForName(v.name || "?")}">${initial}</span>
+        <span>${escapeHtml(v.name || "Espectador")}</span>
+      </div>`;
+    }).join("");
+    wrap.querySelectorAll("[data-open-profile]").forEach((el) => {
+      el.addEventListener("click", () => {
+        document.getElementById("viewers-list-modal").classList.add("hidden");
+        openUserProfile(el.dataset.openProfile);
+      });
+    });
+  }
+  document.getElementById("viewers-list-modal").classList.remove("hidden");
+});
+document.getElementById("close-viewers-list").addEventListener("click", () => {
+  document.getElementById("viewers-list-modal").classList.add("hidden");
 });
 
 function videoCardHtml(p) {
@@ -640,6 +913,10 @@ document.getElementById("create-opt-live").addEventListener("click", () => {
   // esa elección solo aparece después, si la persona decide abrir el panel de 🎲 Dominó.
   goLiveNow();
 });
+document.getElementById("create-opt-join-domino").addEventListener("click", () => {
+  document.getElementById("create-modal").classList.add("hidden");
+  openDominoModal();
+});
 document.getElementById("start-live-from-feed-btn").addEventListener("click", goLiveNow);
 document.getElementById("create-form-back").addEventListener("click", () => {
   stopRecording(true);
@@ -669,6 +946,10 @@ async function openCreateForm(type) {
   photoPreview.classList.add("hidden");
   videoPreview.removeAttribute("src");
   photoPreview.removeAttribute("src");
+  Object.keys(POST_FILTER_RECIPES).forEach((id) => { videoPreview.classList.remove("pf-" + id); photoPreview.classList.remove("pf-" + id); });
+  createSelectedFilterId = "natural";
+  document.getElementById("create-filter-row").classList.add("hidden");
+  document.querySelectorAll(".create-filter-swatch").forEach((b) => b.classList.toggle("selected", b.dataset.filter === "natural"));
   const hint = document.getElementById("create-video-limit-hint");
   stopRecording(true);
   document.getElementById("create-record-box").classList.add("hidden");
@@ -813,6 +1094,107 @@ document.getElementById("create-record-stop-btn").addEventListener("click", () =
 
 let createRecordedDurationSeconds = null;
 
+// Mismas recetas que los filtros de la cámara en vivo, reutilizadas acá para hornear
+// el efecto de verdad en el archivo antes de subirlo (no es solo cosmético).
+const POST_FILTER_RECIPES = {
+  natural: "",
+  warm: "saturate(1.2) hue-rotate(-8deg) brightness(1.06) sepia(0.12)",
+  golden: "sepia(0.32) saturate(1.45) hue-rotate(-12deg) brightness(1.12) contrast(1.05)",
+  vintage: "sepia(0.35) contrast(0.95) brightness(0.96) saturate(0.8)",
+  cinematic: "contrast(1.18) saturate(0.88) brightness(0.95) hue-rotate(-5deg)",
+  vivid: "saturate(1.6) contrast(1.15) brightness(1.03)",
+  cool: "saturate(1.1) hue-rotate(15deg) brightness(1.02) contrast(1.05)",
+  bw: "grayscale(1) contrast(1.1)",
+  softglow: "brightness(1.14) contrast(0.9) saturate(1.08) blur(0.4px)",
+  retro: "sepia(0.28) saturate(1.3) contrast(1.1) hue-rotate(-8deg) brightness(0.97)",
+};
+let createSelectedFilterId = "natural";
+
+document.querySelectorAll(".create-filter-swatch").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".create-filter-swatch").forEach((b) => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    createSelectedFilterId = btn.dataset.filter;
+    const videoPreview = document.getElementById("create-video-preview");
+    const photoPreview = document.getElementById("create-photo-preview");
+    [videoPreview, photoPreview].forEach((el) => {
+      Object.keys(POST_FILTER_RECIPES).forEach((id) => el.classList.remove("pf-" + id));
+      if (createSelectedFilterId !== "natural") el.classList.add("pf-" + createSelectedFilterId);
+    });
+  });
+});
+
+// Aplica el filtro elegido a una FOTO de verdad (no solo cosmético), dibujándola en un
+// canvas con el efecto puesto, y devuelve un archivo nuevo listo para subir.
+function bakePhotoFilter(file, filterId) {
+  return new Promise((resolve) => {
+    const recipe = POST_FILTER_RECIPES[filterId];
+    if (!recipe) return resolve(file);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.filter = recipe;
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (!blob) return resolve(file);
+        resolve(new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }));
+      }, "image/jpeg", 0.9);
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Igual que la de foto, pero para VIDEO: reproduce el original en segundo plano, dibuja
+// cada cuadro en un canvas con el efecto puesto, y graba el resultado con el audio
+// original — así el efecto queda de verdad grabado en el video, no solo en la vista previa.
+function bakeVideoFilter(file, filterId) {
+  return new Promise((resolve) => {
+    const recipe = POST_FILTER_RECIPES[filterId];
+    if (!recipe) return resolve(file);
+    const video = document.createElement("video");
+    video.src = URL.createObjectURL(file);
+    video.muted = false;
+    video.playsInline = true;
+    video.onloadedmetadata = async () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        const sourceStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+        const audioTracks = sourceStream.getAudioTracks();
+        const outStream = canvas.captureStream(30);
+        audioTracks.forEach((t) => outStream.addTrack(t));
+        const chunks = [];
+        const recorder = new MediaRecorder(outStream, { mimeType: "video/webm;codecs=vp9,opus" });
+        recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: "video/webm" });
+          resolve(new File([blob], file.name.replace(/\.\w+$/, "") + ".webm", { type: "video/webm" }));
+        };
+        let stopped = false;
+        function drawFrame() {
+          if (stopped) return;
+          ctx.filter = recipe;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          requestAnimationFrame(drawFrame);
+        }
+        video.onended = () => { stopped = true; recorder.stop(); };
+        recorder.start();
+        drawFrame();
+        await video.play();
+      } catch (e) {
+        resolve(file); // si algo falla, subimos el video original sin el efecto antes que perderlo
+      }
+    };
+    video.onerror = () => resolve(file);
+  });
+}
+
 document.getElementById("create-file-input").addEventListener("change", (e) => {
   const file = e.target.files[0];
   createSelectedFile = file || null;
@@ -820,6 +1202,10 @@ document.getElementById("create-file-input").addEventListener("change", (e) => {
   const errEl = document.getElementById("create-error");
   errEl.textContent = "";
   if (!file) return;
+
+  document.getElementById("create-filter-row").classList.remove("hidden");
+  createSelectedFilterId = "natural";
+  document.querySelectorAll(".create-filter-swatch").forEach((b) => b.classList.toggle("selected", b.dataset.filter === "natural"));
 
   if (createPostType === "video") {
     const preview = document.getElementById("create-video-preview");
@@ -858,10 +1244,21 @@ document.getElementById("create-publish-btn").addEventListener("click", async ()
     errEl.textContent = "Ese video dura más de lo permitido para tu cuenta."; return;
   }
 
+  let fileToUpload = createSelectedFile;
+  if (fileToUpload && createSelectedFilterId && createSelectedFilterId !== "natural") {
+    document.getElementById("create-processing-msg").classList.remove("hidden");
+    try {
+      fileToUpload = createPostType === "photo"
+        ? await bakePhotoFilter(createSelectedFile, createSelectedFilterId)
+        : await bakeVideoFilter(createSelectedFile, createSelectedFilterId);
+    } catch (e) { /* si falla, seguimos con el archivo original */ }
+    document.getElementById("create-processing-msg").classList.add("hidden");
+  }
+
   const fd = new FormData();
   fd.append("type", createPostType);
   fd.append("caption", caption);
-  if (createSelectedFile) fd.append("file", createSelectedFile);
+  if (fileToUpload) fd.append("file", fileToUpload);
   if (createPostType === "video") {
     let seconds;
     if (createRecordedDurationSeconds != null) {
@@ -903,6 +1300,32 @@ function openPostViewer(post, list, index) {
   currentSwipeIndex = index !== undefined ? index : 0;
   const mediaWrap = document.getElementById("post-viewer-media");
   mediaWrap.className = "";
+  const railEl = document.getElementById("post-viewer-rail");
+
+  if (post.isLive) {
+    // Esto no es una publicación, es un en vivo mezclado en el feed — se muestra distinto,
+    // con un botón grande para entrar, en vez de la barra de like/comentar/etc.
+    railEl.classList.add("hidden");
+    mediaWrap.classList.add("live-preview-card");
+    mediaWrap.innerHTML = `
+      <div class="live-preview-badge">🔴 EN VIVO · ${post.spectatorCount} mirando</div>
+      <div class="live-preview-players">${(post.players || []).map(escapeHtml).join(" · ")}</div>
+      <div class="live-preview-meta">Sala ${escapeHtml(post.code)} · ${(post.players || []).length}/${post.capacity} jugadores</div>
+      <button class="btn-watch" id="live-preview-enter-btn">▶ Entrar al vivo</button>
+    `;
+    document.getElementById("live-preview-enter-btn").addEventListener("click", () => {
+      location.href = "/?watch=" + post.code;
+    });
+    document.getElementById("post-viewer-author").textContent = "";
+    document.getElementById("post-viewer-caption").textContent = "";
+    document.getElementById("post-viewer-avatar").style.display = "none";
+    document.getElementById("post-viewer-avatar-fallback").style.display = "none";
+    document.getElementById("post-viewer").classList.remove("hidden");
+    return;
+  }
+  railEl.classList.remove("hidden");
+  mediaWrap.classList.remove("live-preview-card");
+
   if (post.type === "video") {
     mediaWrap.innerHTML = `<video src="${post.fileUrl}" autoplay loop playsinline></video>`;
     const videoEl = mediaWrap.querySelector("video");
@@ -930,6 +1353,19 @@ function openPostViewer(post, list, index) {
   document.getElementById("post-like-count").textContent = post.likeCount;
   document.getElementById("post-like-btn").classList.toggle("active", post.likedByMe);
   document.getElementById("post-comment-count").textContent = (post.comments || []).length;
+  const toggleCommentsBtn = document.getElementById("post-toggle-comments-btn");
+  const isMyOwnPostForComments = post.authorEmail === myEmail;
+  toggleCommentsBtn.classList.toggle("hidden", !isMyOwnPostForComments);
+  if (isMyOwnPostForComments) {
+    toggleCommentsBtn.textContent = post.commentsClosed ? "🔓" : "🔒";
+    toggleCommentsBtn.title = post.commentsClosed ? "Abrir comentarios de nuevo" : "Cerrar comentarios";
+  }
+  document.getElementById("post-save-btn").classList.toggle("active", !!post.savedByMe);
+  const followBtn = document.getElementById("post-follow-btn");
+  const isMyOwnPost = post.authorEmail === myEmail;
+  followBtn.classList.toggle("hidden", isMyOwnPost);
+  followBtn.innerHTML = post.isFollowingAuthor ? "✓" : '<span class="fab-plus-mini"></span>';
+  followBtn.classList.toggle("active", !!post.isFollowingAuthor);
   document.getElementById("post-viewer").classList.remove("hidden");
 
   // Avisamos al servidor que se vio esta publicación (alimenta el algoritmo "Para ti")
@@ -1015,6 +1451,33 @@ document.getElementById("post-like-btn").addEventListener("click", async () => {
     document.getElementById("post-like-btn").classList.toggle("active", data.liked);
     currentViewedPost.likeCount = data.likeCount;
     currentViewedPost.likedByMe = data.liked;
+  } catch (e) {}
+});
+
+document.getElementById("post-save-btn").addEventListener("click", async () => {
+  if (!currentViewedPost) return;
+  try {
+    const res = await fetch("/api/posts/" + currentViewedPost.id + "/save", { method: "POST", headers: { Authorization: "Bearer " + authToken } });
+    const data = await res.json();
+    document.getElementById("post-save-btn").classList.toggle("active", data.saved);
+    currentViewedPost.savedByMe = data.saved;
+    showToast(data.saved ? "Guardado en tu perfil." : "Lo sacaste de guardados.");
+  } catch (e) {}
+});
+
+document.getElementById("post-follow-btn").addEventListener("click", async () => {
+  if (!currentViewedPost) return;
+  const btn = document.getElementById("post-follow-btn");
+  const nowFollowing = !currentViewedPost.isFollowingAuthor;
+  try {
+    await fetch("/api/" + (nowFollowing ? "follow" : "unfollow"), {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + authToken },
+      body: JSON.stringify({ email: currentViewedPost.authorEmail }),
+    });
+    currentViewedPost.isFollowingAuthor = nowFollowing;
+    btn.innerHTML = nowFollowing ? "✓" : '<span class="fab-plus-mini"></span>';
+    btn.classList.toggle("active", nowFollowing);
+    showToast(nowFollowing ? "Ahora seguís a " + currentViewedPost.authorName : "Dejaste de seguir a " + currentViewedPost.authorName);
   } catch (e) {}
 });
 
@@ -1166,6 +1629,19 @@ document.getElementById("post-comment-btn").addEventListener("click", () => {
   if (!currentViewedPost) return;
   renderPostComments();
   document.getElementById("post-comments-sheet").classList.remove("hidden");
+});
+document.getElementById("post-toggle-comments-btn").addEventListener("click", async () => {
+  if (!currentViewedPost) return;
+  const nowClosed = !currentViewedPost.commentsClosed;
+  if (nowClosed && !confirm("¿Cerrar los comentarios de esta publicación? Nadie va a poder comentar.")) return;
+  try {
+    const res = await fetch("/api/posts/" + currentViewedPost.id + "/toggle-comments", { method: "POST", headers: { Authorization: "Bearer " + authToken } });
+    const data = await res.json();
+    currentViewedPost.commentsClosed = data.commentsClosed;
+    const btn = document.getElementById("post-toggle-comments-btn");
+    btn.textContent = data.commentsClosed ? "🔓" : "🔒";
+    showToast(data.commentsClosed ? "Comentarios cerrados." : "Comentarios abiertos de nuevo.");
+  } catch (e) {}
 });
 document.getElementById("post-comments-close").addEventListener("click", () => {
   document.getElementById("post-comments-sheet").classList.add("hidden");
@@ -1483,14 +1959,26 @@ async function loadThreadMessages() {
     const data = await res.json();
     const wrap = document.getElementById("thread-messages");
     wrap.innerHTML = data.messages.map((m) => {
+      if (m.deleted) {
+        return `<div class="msg-bubble ${m.from === myEmail ? "mine" : "theirs"} msg-deleted"><i>Mensaje eliminado</i></div>`;
+      }
       const sharedHtml = m.sharedPost ? renderSharedPostCard(m.sharedPost) : "";
-      return `<div class="msg-bubble ${m.from === myEmail ? "mine" : "theirs"}">${escapeHtml(m.text)}${sharedHtml}</div>`;
+      const deleteBtn = m.from === myEmail ? `<button class="msg-delete-btn" data-delete-msg="${m.id}" title="Borrar">🗑️</button>` : "";
+      return `<div class="msg-bubble ${m.from === myEmail ? "mine" : "theirs"}">${escapeHtml(m.text)}${sharedHtml}${deleteBtn}</div>`;
     }).join("");
     wrap.scrollTop = wrap.scrollHeight;
     wrap.querySelectorAll("[data-shared-post-id]").forEach((el) => {
       el.addEventListener("click", () => {
         const post = threadSharedPostsCache[el.dataset.sharedPostId];
         if (post) openPostViewer(post, [post], 0);
+      });
+    });
+    wrap.querySelectorAll("[data-delete-msg]").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm("¿Borrar este mensaje?")) return;
+        await fetch("/api/messages/" + btn.dataset.deleteMsg + "/delete", { method: "POST", headers: { Authorization: "Bearer " + authToken } });
+        loadThreadMessages();
       });
     });
   } catch (e) {}
@@ -1607,7 +2095,7 @@ function playerRowHtml(p) {
   const messageBtn = `<button class="btn-message" data-message-email="${escapeHtml(p.email)}" data-message-name="${escapeHtml(p.name)}">✉️</button>`;
   const subscribeBtn = `<button class="btn-subscribe" data-sub-email="${escapeHtml(p.email)}" data-sub-name="${escapeHtml(p.name)}">🌟</button>`;
   return `<div class="player-row">
-    <span class="player-name">${escapeHtml(p.name)} ${liveTag ? '· ' + liveTag : ''}</span>
+    <span class="player-name player-name-clickable" data-open-profile="${escapeHtml(p.email)}">${escapeHtml(p.name)} ${liveTag ? '· ' + liveTag : ''}</span>
     <span class="player-actions">${watchBtn}${followBtn}${messageBtn}${subscribeBtn}</span>
   </div>`;
 }
@@ -1615,6 +2103,9 @@ function playerRowHtml(p) {
 function attachPlayerRowHandlers(wrap, inputId, resultsId) {
   inputId = inputId || "search-input";
   resultsId = resultsId || "search-results";
+  wrap.querySelectorAll("[data-open-profile]").forEach((el) => {
+    el.addEventListener("click", () => openUserProfile(el.dataset.openProfile));
+  });
   wrap.querySelectorAll("[data-message-email]").forEach((btn) => {
     btn.addEventListener("click", () => {
       switchLobbyTab("messages");
@@ -1697,7 +2188,7 @@ async function setupLiveSwipeGestures() {
     if (touchStartY === null) return;
     const dy = e.touches[0].clientY - touchStartY;
     const dx = e.touches[0].clientX - touchStartX;
-    if (!isDraggingVertically && Math.abs(dy) > 15 && Math.abs(dy) > Math.abs(dx)) isDraggingVertically = true;
+    if (!isDraggingVertically && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) isDraggingVertically = true;
     if (isDraggingVertically && e.cancelable) e.preventDefault();
   }, { passive: false });
 
@@ -1705,7 +2196,7 @@ async function setupLiveSwipeGestures() {
     if (mySeatIndex !== null || touchStartY === null) return;
     const deltaY = e.changedTouches[0].clientY - touchStartY;
     touchStartY = null;
-    if (!isDraggingVertically || Math.abs(deltaY) < 45) return; // deslizamiento muy chico, lo ignoramos
+    if (!isDraggingVertically || Math.abs(deltaY) < 30) return; // deslizamiento muy chico, lo ignoramos
     goToNextLive(deltaY < 0 ? 1 : -1);
   }, { passive: true });
 
@@ -1854,16 +2345,50 @@ function renderSpectatorView(state) {
   renderGame(state, !amPlaying);
 }
 
+// ---------------- Aviso de "alguien que seguís se puso en vivo" ----------------
+function showFollowedLiveBanner(data) {
+  const existing = document.getElementById("followed-live-banner");
+  if (existing) existing.remove();
+  const banner = document.createElement("div");
+  banner.id = "followed-live-banner";
+  const initial = (data.hostName || "?").trim().charAt(0).toUpperCase();
+  const avatarHtml = data.hostAvatar
+    ? `<img src="${data.hostAvatar}" alt="" />`
+    : `<span class="followed-live-avatar-fallback" style="background:${colorForName(data.hostName || "?")}">${initial}</span>`;
+  banner.innerHTML = `
+    ${avatarHtml}
+    <span class="followed-live-text">🔴 <b>${escapeHtml(data.hostName)}</b> se puso en vivo</span>
+    <button id="followed-live-close">✕</button>
+  `;
+  banner.addEventListener("click", (e) => {
+    if (e.target.id === "followed-live-close") { banner.remove(); return; }
+    location.href = "/?watch=" + data.code;
+  });
+  document.body.appendChild(banner);
+  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 12000);
+}
+
 function attachSocketHandlers() {
   wireBattleSocketEvents(socket);
   wireModerationSocketEvents(socket);
   wireRtcSocketEvents(socket);
   wireMeetingSocketEvents(socket);
+  socket.on("followedUserWentLive", (data) => {
+    showFollowedLiveBanner(data);
+  });
   socket.on("connect_error", () => {
-    document.getElementById("auth-error").textContent = "Tu sesión expiró, iniciá sesión de nuevo.";
-    localStorage.removeItem("domino_token");
-    authEl.classList.remove("hidden");
-    lobbyEl.classList.add("hidden");
+    // Esto NO significa que la sesión venció — el servidor nunca rechaza la conexión
+    // por un token viejo, así que esto es casi siempre un corte de red momentáneo
+    // (wifi que se corta un instante, el servidor recién despertando, etc). Por eso
+    // ya no te saca de la cuenta ni te pide entrar de nuevo: el socket reintenta solo.
+    showConnectionBanner("Reconectando...");
+  });
+  socket.on("connect", () => {
+    hideConnectionBanner();
+  });
+  socket.on("disconnect", (reason) => {
+    if (reason === "io server disconnect" || reason === "io client disconnect") return; // fue algo intencional, no un corte
+    showConnectionBanner("Reconectando...");
   });
 
   createBtn.addEventListener("click", () => { closeDominoModal(); iAmCreatingRoom = true; socket.emit("createRoom", { capacity: selectedCap, handSize: selectedHandSize }); });
@@ -2557,6 +3082,7 @@ document.getElementById("create-opt-schedule-meeting").addEventListener("click",
   document.getElementById("schedule-meeting-time").value = "";
   document.getElementById("schedule-meeting-emails").value = "";
   document.getElementById("schedule-meeting-msg").textContent = "";
+  document.getElementById("schedule-meeting-link-box").classList.add("hidden");
   document.getElementById("schedule-meeting-date").min = new Date().toISOString().slice(0, 10);
   document.getElementById("schedule-meeting-modal").classList.remove("hidden");
 });
@@ -2584,12 +3110,20 @@ document.getElementById("submit-schedule-meeting").addEventListener("click", asy
     msgEl.style.color = "#8fd4a8";
     const inviteMsg = data.invitedCount ? (" Se les mandó la invitación a " + data.invitedCount + " persona" + (data.invitedCount > 1 ? "s" : "") + " por email.") : "";
     msgEl.textContent = "¡Reservada! Tu código es " + data.meeting.code + "." + inviteMsg;
+    const link = location.origin + "/?joinMeeting=" + data.meeting.code;
+    document.getElementById("schedule-meeting-link-input").value = link;
+    document.getElementById("schedule-meeting-link-box").classList.remove("hidden");
     showToast("Reunión programada. Código: " + data.meeting.code);
     loadMyScheduledMeetings();
   } catch (e) {
     msgEl.style.color = "#ff8a80";
     msgEl.textContent = "Error de conexión.";
   }
+});
+document.getElementById("copy-schedule-meeting-link").addEventListener("click", () => {
+  const input = document.getElementById("schedule-meeting-link-input");
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => showToast("¡Enlace copiado! Ya lo podés mandar por donde quieras."));
 });
 
 async function loadMyScheduledMeetings() {
@@ -2607,12 +3141,19 @@ async function loadMyScheduledMeetings() {
           <span style="color:#9fc9b8;font-size:11px;">${when.toLocaleDateString("es")} · ${when.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })} · código ${m.code}</span></span>
         <span class="recording-row-actions">
           <button data-start-sched="${m.code}">▶️ Iniciar</button>
+          <button data-copy-sched="${m.code}">📋 Enlace</button>
           <button data-cancel-sched="${m.code}">🗑️</button>
         </span>
       </div>`;
     }).join("");
     wrap.querySelectorAll("[data-start-sched]").forEach((btn) => {
       btn.addEventListener("click", () => socket.emit("startScheduledMeeting", { code: btn.dataset.startSched }));
+    });
+    wrap.querySelectorAll("[data-copy-sched]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const link = location.origin + "/?joinMeeting=" + btn.dataset.copySched;
+        navigator.clipboard.writeText(link).then(() => showToast("¡Enlace copiado!"));
+      });
     });
     wrap.querySelectorAll("[data-cancel-sched]").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -3040,6 +3581,7 @@ function renderGame(state, readOnly) {
 
   document.getElementById("spectator-count").textContent =
     state.spectatorCount ? "👁 " + state.spectatorCount + " mirando" : "";
+  latestSpectatorsList = state.spectatorsList || [];
 
   const queueLen = (state.queue || []).length;
   const queueEl = document.getElementById("queue-count");
@@ -3460,7 +4002,14 @@ document.getElementById("rail-emoji-btn").addEventListener("click", (e) => {
 
 document.getElementById("toggle-guests-open-btn").addEventListener("click", () => {
   const isOpen = document.getElementById("toggle-guests-open-btn").classList.contains("guests-open-active");
-  socket.emit("toggleGuestsOpen", { open: !isOpen });
+  const limit = document.getElementById("guests-limit-select").value;
+  socket.emit("toggleGuestsOpen", { open: !isOpen, limit });
+  showToast(!isOpen ? "✅ Ventanillas abiertas — hasta " + limit + " personas van a poder pedir subir a cámara." : "🔒 Ventanillas cerradas.");
+});
+document.getElementById("toggle-comments-closed-btn").addEventListener("click", () => {
+  const isClosed = document.getElementById("toggle-comments-closed-btn").classList.contains("comments-closed-active");
+  socket.emit("toggleCommentsClosed", { closed: !isClosed });
+  showToast(!isClosed ? "💬 Comentarios cerrados — nadie va a poder escribir." : "💬 Comentarios abiertos de nuevo.");
 });
 document.getElementById("request-camera-btn-on").addEventListener("click", () => {
   socket.emit("requestJoinCamera", { withCamera: true });
@@ -3612,11 +4161,19 @@ document.getElementById("toggle-settings-panel-btn").addEventListener("click", (
 
 // ---------------- Batalla LIVE: invitar, aceptar/rechazar, puntaje ----------------
 let selectedBattleDuration = 60;
+let selectedBattleRematchMinutes = 0;
 document.querySelectorAll("#battle-duration-row .cam-filter-swatch").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("#battle-duration-row .cam-filter-swatch").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     selectedBattleDuration = parseInt(btn.dataset.seconds, 10);
+  });
+});
+document.querySelectorAll("#battle-rematch-row .cam-filter-swatch").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#battle-rematch-row .cam-filter-swatch").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedBattleRematchMinutes = parseInt(btn.dataset.rematchMin, 10);
   });
 });
 
@@ -3636,7 +4193,8 @@ async function loadBattleTargets() {
     `).join("");
     wrap.querySelectorAll("[data-invite]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        socket.emit("inviteBattle", { targetCode: btn.dataset.invite, durationSeconds: selectedBattleDuration });
+        socket.emit("inviteBattle", { targetCode: btn.dataset.invite, durationSeconds: selectedBattleDuration, autoRematchMinutes: selectedBattleRematchMinutes || null });
+        showToast(selectedBattleRematchMinutes ? "Desafío enviado — si se acepta, se va a relanzar sola cada " + selectedBattleRematchMinutes + " min." : "Desafío enviado.");
       });
     });
   } catch (e) {
@@ -3660,8 +4218,9 @@ function wireBattleSocketEvents(sock) {
   });
   sock.on("battleInvited", (data) => {
     const mins = Math.round(data.durationSeconds / 60);
+    const rematchText = data.autoRematchMinutes ? " Si aceptás, se va a volver a armar sola cada " + data.autoRematchMinutes + " min mientras las dos sigan en vivo." : "";
     document.getElementById("battle-invite-text").textContent =
-      data.fromName + " te desafió a una batalla LIVE de " + mins + " minuto" + (mins === 1 ? "" : "s") + ". ¿Aceptás?";
+      data.fromName + " te desafió a una batalla LIVE de " + mins + " minuto" + (mins === 1 ? "" : "s") + ". ¿Aceptás?" + rematchText;
     document.getElementById("battle-invite-modal").classList.remove("hidden");
   });
   sock.on("battleDeclined", (data) => {
@@ -3743,8 +4302,9 @@ function renderBattle(state) {
     const myScore = battle.myScore, oppScore = battle.opponentScore;
     const resultText = myScore === oppScore
       ? "🤝 ¡Empate! " + myScore + " 💎 a " + oppScore + " 💎"
-      : (myScore > oppScore ? "🏆 ¡Ganaste la batalla!" : "😔 Perdiste la batalla") + " (" + myScore + " 💎 vs " + oppScore + " 💎)";
-    document.getElementById("battle-result-text").textContent = resultText;
+      : (myScore > oppScore ? "🏆 ¡Ganaste la batalla!" : "😔 Perdiste la batalla") + " (" + myScore + " ⭐ puntos vs " + oppScore + " ⭐ puntos)";
+    const rematchNote = battle.autoRematchMinutes ? "\n🔁 Se va a relanzar sola en " + battle.autoRematchMinutes + " min." : "";
+    document.getElementById("battle-result-text").textContent = resultText + rematchNote;
     document.getElementById("battle-result-overlay").classList.remove("hidden");
     return;
   }
@@ -3903,12 +4463,14 @@ function appendChatLine(c) {
   avatar.className = "chat-line-avatar";
   avatar.style.background = colorForName(c.name || "?");
   avatar.textContent = initial;
+  if (c.email) { avatar.style.cursor = "pointer"; avatar.addEventListener("click", () => openUserProfile(c.email)); }
   line.appendChild(avatar);
   const textSpan = document.createElement("span");
   const badgeHtml = c.badge ? `<span class="name-badge">${c.badge}</span>` : "";
   const nameStyle = c.nameColor ? ` style="color:${c.nameColor}"` : "";
   const isMuted = mutedNamesSet.has(c.name);
-  textSpan.innerHTML = badgeHtml + "<b" + nameStyle + ">" + escapeHtml(c.name) + "</b> " + escapeHtml(c.text) + (isMuted ? ' <span class="mod-tag">🔇</span>' : "");
+  textSpan.innerHTML = badgeHtml + "<b" + nameStyle + (c.email ? ' class="chat-line-name-clickable"' : "") + ">" + escapeHtml(c.name) + "</b> " + escapeHtml(c.text) + (isMuted ? ' <span class="mod-tag">🔇</span>' : "");
+  if (c.email) textSpan.querySelector("b").addEventListener("click", () => openUserProfile(c.email));
   line.appendChild(textSpan);
 
   if (amIModerator && c.name !== myName) {
@@ -3958,6 +4520,7 @@ let myMonetizationStatus = "no_solicitado";
 let myFollowerCount = 0;
 
 async function loadProfile() {
+  loadMySupportThreads();
   try {
     const res = await fetch("/api/me", { headers: { Authorization: "Bearer " + authToken } });
     const data = await res.json();
@@ -4357,18 +4920,45 @@ function showToast(text) {
   setTimeout(() => el.remove(), 4000);
 }
 
+// Catálogo propio de regalos de TableLive — en vez de solo 3 montos sueltos, una
+// cuadrícula compacta y prolija con ícono + nombre + precio, como hace TikTok pero
+// con nuestra propia identidad (dados, mesas, diamantes, trofeos).
+// Catálogo de respaldo, por si todavía no cargó el real del servidor (ver loadGiftCatalog)
+const FALLBACK_GIFT_CATALOG = [
+  { symbol: "🐣", name: "Pollito", amount: 100 },
+  { symbol: "🐰", name: "Conejo", amount: 300 },
+  { symbol: "🐶", name: "Perro", amount: 700 },
+  { symbol: "🐺", name: "Lobo", amount: 1000 },
+];
+
 function openGiftPicker(anchorEl, seatIndex) {
   closeGiftPicker();
   const picker = document.createElement("div");
   picker.id = "gift-picker";
   const rect = anchorEl.getBoundingClientRect();
+  const pickerWidth = 220;
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth - pickerWidth - 10);
   picker.style.top = rect.bottom + window.scrollY + 4 + "px";
-  picker.style.left = rect.left + window.scrollX + "px";
-  [10, 50, 100].forEach((amt) => {
+  picker.style.left = Math.max(10, left) + "px";
+  picker.innerHTML = '<div id="gift-picker-header">🎁 Mandar un regalo</div><div id="gift-picker-grid"></div><button id="gift-picker-buy-coins">🪙 Comprar más monedas</button>';
+  const grid = picker.querySelector("#gift-picker-grid");
+  const catalog = giftCatalogCache && giftCatalogCache.length ? giftCatalogCache : FALLBACK_GIFT_CATALOG;
+  catalog.forEach((gift) => {
     const b = document.createElement("button");
-    b.textContent = amt + " 🪙";
-    b.addEventListener("click", () => { socket.emit("sendGift", { toSeatIndex: seatIndex, amount: amt }); closeGiftPicker(); });
-    picker.appendChild(b);
+    b.className = "gift-catalog-item";
+    const iAfford = myCoinBalance >= gift.amount;
+    if (!iAfford) b.classList.add("gift-catalog-item-locked");
+    b.innerHTML = `<span class="gift-catalog-icon">${gift.symbol}</span><span class="gift-catalog-name">${gift.name}</span><span class="gift-catalog-price">🪙 ${gift.amount}</span>`;
+    b.addEventListener("click", () => {
+      if (!iAfford) { showToast("No te alcanzan las monedas para este regalo."); return; }
+      socket.emit("sendGift", { toSeatIndex: seatIndex, amount: gift.amount });
+      closeGiftPicker();
+    });
+    grid.appendChild(b);
+  });
+  picker.querySelector("#gift-picker-buy-coins").addEventListener("click", () => {
+    closeGiftPicker();
+    document.getElementById("buy-gems-btn").click();
   });
   document.body.appendChild(picker);
   setTimeout(() => document.addEventListener("click", closeGiftPickerOnce), 0);
