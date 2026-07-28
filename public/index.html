@@ -346,6 +346,7 @@
         <div id="my-videos-grid"></div>
       </div>
 
+      <p style="text-align:center;margin-top:18px;"><a href="#" id="open-terms-link" style="color:#9fc9b8;">📜 Reglas y Términos de uso</a></p>
       <p style="text-align:center;margin-top:18px;"><a href="#" id="logout-link" style="color:#e0a63e;">Cerrar sesión</a></p>
     </div>
 
@@ -353,6 +354,7 @@
     <nav id="bottom-nav">
       <button class="nav-btn selected" data-tab="feed">🏠<span data-i18n="nav_home">Inicio</span></button>
       <button class="nav-btn" data-tab="search">🔍<span data-i18n="nav_search">Buscar</span></button>
+      <button class="nav-plain-btn" id="domino-fab-btn" title="Dominó">🎲<span data-i18n="nav_domino_nav">Dominó</span></button>
       <button id="create-fab-btn" title="Crear"><span class="fab-plus"></span></button>
       <button class="nav-btn" data-tab="messages">💬<span id="messages-unread-dot" class="hidden"></span><span data-i18n="nav_messages">Mensajes</span></button>
       <button class="nav-btn" data-tab="profile">👤<span data-i18n="nav_profile">Perfil</span></button>
@@ -491,6 +493,7 @@
 
   <div id="post-comments-sheet" class="hidden">
     <div id="post-comments-list"></div>
+    <div id="post-comment-mention-suggestions" class="hidden"></div>
     <div id="post-comments-input-row">
       <input id="post-comment-input" type="text" placeholder="Escribí un comentario..." maxlength="300" />
       <button id="post-comment-send-btn" data-i18n="btn_send">Enviar</button>
@@ -545,12 +548,23 @@
   </div>
 
   <div id="meeting-screen" class="screen hidden">
+    <div id="meeting-entry-fx" class="hidden">
+      <div id="meeting-entry-rings">
+        <div class="meeting-entry-ring"></div>
+        <div class="meeting-entry-ring"></div>
+        <div class="meeting-entry-ring"></div>
+        <div id="meeting-entry-core">TL</div>
+      </div>
+      <p id="meeting-entry-status">Iniciando conexión segura...</p>
+      <div id="meeting-entry-scanline"></div>
+    </div>
     <div id="meeting-video-grid"></div>
     <div id="meeting-top-bar">
       <span id="meeting-code-label"></span>
       <span id="meeting-timer"></span>
       <div style="flex:1;"></div>
       <button id="meeting-filters-btn" title="Filtros">🎨</button>
+      <button id="meeting-whiteboard-btn" title="Pizarra">📝</button>
       <button id="meeting-share-btn" title="Compartir código">🔗</button>
       <button id="meeting-leave-btn" title="Salir">🚪</button>
     </div>
@@ -585,6 +599,22 @@
         <button class="vbg-swatch" data-vbg="presentacion" data-vbg-ctx="meeting" style="background-image:url('/splash-presentacion.jpg');"></button>
       </div>
       <p id="vbg-msg-meeting" style="font-size:11px;color:#9fc9b8;"></p>
+    </div>
+
+    <!-- ---- Pizarra opcional (para clases, cursos virtuales, cualquier explicación) ---- -->
+    <div id="meeting-whiteboard" class="hidden">
+      <canvas id="meeting-whiteboard-canvas"></canvas>
+      <div id="meeting-whiteboard-toolbar">
+        <button class="whiteboard-chalk" data-chalk-color="#ffffff" style="background:#ffffff;"></button>
+        <button class="whiteboard-chalk" data-chalk-color="#f4cf6a" style="background:#f4cf6a;"></button>
+        <button class="whiteboard-chalk" data-chalk-color="#ff6b6b" style="background:#ff6b6b;"></button>
+        <button class="whiteboard-chalk" data-chalk-color="#5bc9f5" style="background:#5bc9f5;"></button>
+        <button class="whiteboard-chalk" data-chalk-color="#7ee08c" style="background:#7ee08c;"></button>
+        <button class="whiteboard-chalk" data-chalk-color="#c98ae0" style="background:#c98ae0;"></button>
+        <button id="whiteboard-eraser" title="Borrador">🧽</button>
+        <button id="whiteboard-clear" title="Borrar todo">🗑️</button>
+        <button id="whiteboard-close" title="Cerrar pizarra">✕</button>
+      </div>
     </div>
     <div id="meeting-bottom-bar">
       <button id="meeting-mic-btn">🔇 Prender mi micrófono</button>
@@ -658,6 +688,39 @@
     <div id="on-camera-strip"></div>
 
     <!-- ---- Perfil público de un usuario (tocable desde cualquier lado) ---- -->
+    <div id="terms-modal" class="hidden">
+      <div class="card" id="terms-card">
+        <button id="close-terms-modal" style="width:auto;float:right;">✕</button>
+        <h3>📜 Reglas y Términos de uso de TableLive</h3>
+        <div id="terms-content">
+          <p>TableLive es un juego gratis para jugar dominó, conocer gente, y pasarla bien en vivo. Estas son solo algunas reglas simples para que la pasemos bien todos.</p>
+
+          <p class="settings-label">1. Es para divertirse</p>
+          <p>Jugá, compartí, mirá en vivo, chateá — la idea es pasarla bien. Si en algún momento sentís que se pone pesado o incómodo, avisanos.</p>
+
+          <p class="settings-label">2. Tu cuenta</p>
+          <p>Cuidá tu contraseña y no la compartas. Si algo raro pasa con tu cuenta, contanos.</p>
+
+          <p class="settings-label">3. Monedas y diamantes</p>
+          <p>Son parte del juego — monedas para mandar regalos, diamantes que se ganan jugando y recibiendo regalos. Es un juego, no una inversión ni una forma de ganarte la vida.</p>
+
+          <p class="settings-label">4. Buen trato entre todos</p>
+          <p>No se permite el acoso, la discriminación, ni contenido que no corresponda (violencia real, contenido sexual, nada que involucre a menores de forma inapropiada). Si alguien se porta mal, se lo puede silenciar, suspender, o bloquear, para que el resto la siga pasando bien.</p>
+
+          <p class="settings-label">5. Lo que subís es tuyo, y tu responsabilidad</p>
+          <p>Publicá lo que quieras compartir, pero que sea tuyo y que no moleste a nadie.</p>
+
+          <p class="settings-label">6. Reuniones privadas</p>
+          <p>Son entre vos y quien invites — no se graban a menos que vos actives la grabación.</p>
+
+          <p class="settings-label">7. Podés bloquear a quien quieras</p>
+          <p>Si alguien te molesta, bloquealo cuando quieras — deja de poder seguirte, comentarte, o escribirte.</p>
+
+          <p style="font-size:11px;color:#9fc9b8;margin-top:16px;">Esto puede ir cambiando a medida que el juego crece. Gracias por ser parte de TableLive 🎲</p>
+        </div>
+      </div>
+    </div>
+
     <div id="viewers-list-modal" class="hidden">
       <div class="card">
         <button id="close-viewers-list" style="width:auto;float:right;">✕</button>
@@ -695,7 +758,14 @@
     <!-- ---- Panel para desafiar a otra transmisión a una Batalla LIVE ---- -->
     <div id="battle-panel" class="hidden overlay-dropdown">
       <p class="settings-label">⚔️ Batalla LIVE</p>
-      <p style="font-size:12px;color:#9fc9b8;margin:0 0 8px;">Elegí otra transmisión en vivo y desafiala. Gana quien más regalos reciba antes de que se acabe el tiempo.</p>
+
+      <div id="battle-request-box" class="hidden">
+        <p style="font-size:12px;color:#9fc9b8;margin:0 0 8px;">¿Tenés tu propia transmisión en vivo abierta en otra pestaña? Podés pedirle batalla al anfitrión de acá — le va a llegar el pedido y puede aceptarlo o rechazarlo.</p>
+        <button id="request-battle-btn" style="width:100%;margin-bottom:14px;">🎯 Pedir batalla con este anfitrión</button>
+      </div>
+
+      <div id="battle-host-tools">
+      <p style="font-size:12px;color:#9fc9b8;margin:0 0 8px;">Elegí hasta 9 transmisiones más (hasta 10 en total con la tuya) y mandales una invitación. Gana quien más puntos de regalo reciba antes de que se acabe el tiempo. ⚡ En batallas de 2 minutos o más puede aparecer "Doble Puntos" sorpresa, y 🔥 los últimos segundos ("PK Final") los regalos valen 1.5 veces más.</p>
       <label style="font-size:12px;">Duración</label>
       <div class="mesa-swatches" id="battle-duration-row">
         <button class="cam-filter-swatch active" data-seconds="60">1 min</button>
@@ -712,8 +782,16 @@
         <button class="cam-filter-swatch" data-rematch-min="5">5 min</button>
         <button class="cam-filter-swatch" data-rematch-min="10">10 min</button>
       </div>
-      <p style="font-size:11px;color:#9fc9b8;margin:2px 0 8px;">Si elegís un tiempo, cuando esta batalla termine se va a volver a armar sola con el mismo rival después de esos minutos (mientras las dos transmisiones sigan en vivo).</p>
+      <p style="font-size:11px;color:#9fc9b8;margin:2px 0 8px;">Si elegís un tiempo, cuando esta batalla termine se va a volver a armar sola con quienes sigan disponibles, después de esos minutos.</p>
       <div id="battle-target-list"></div>
+      <button id="send-battle-group-invite-btn" class="hidden" style="margin-top:8px;">⚔️ Invitar a los seleccionados</button>
+
+      <div id="battle-roster-box" class="hidden" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(224,166,62,0.2);">
+        <p class="settings-label">Quién ya aceptó</p>
+        <div id="battle-roster-list" style="font-size:12px;color:#cfe3da;margin-bottom:8px;"></div>
+        <button id="start-group-battle-btn">🚀 Iniciar batalla ahora</button>
+      </div>
+      </div>
     </div>
 
     <!-- ---- Invitación entrante a batalla ---- -->
@@ -729,33 +807,17 @@
     <!-- ---- Barra de puntaje mientras hay una batalla activa ---- -->
     <div id="battle-bar" class="hidden">
       <div id="battle-bar-names">
-        <span id="battle-my-name"></span>
+        <span>⚔️ Batalla LIVE</span>
         <span id="battle-timer">0:00</span>
-        <span id="battle-opponent-name"></span>
       </div>
-      <div id="battle-bar-track">
-        <div id="battle-bar-fill-me"></div>
-        <div id="battle-bar-fill-opponent"></div>
-      </div>
-      <div id="battle-bar-scores">
-        <div class="battle-score-block" id="battle-my-block">
-          <span class="battle-score-num" id="battle-my-score">0</span>
-          <span class="battle-score-diamonds">⭐ mis puntos</span>
-          <span class="battle-top-gifter hidden" id="battle-my-top-gifter"></span>
-          <span class="battle-leading-tag hidden" id="battle-my-leading-tag">🏆 Ganando</span>
-        </div>
-        <div class="battle-score-block" id="battle-opponent-block">
-          <span class="battle-score-num" id="battle-opponent-score">0</span>
-          <span class="battle-score-diamonds">⭐ puntos rival</span>
-          <span class="battle-top-gifter hidden" id="battle-opponent-top-gifter"></span>
-          <span class="battle-leading-tag hidden" id="battle-opponent-leading-tag">🏆 Ganando</span>
-        </div>
-      </div>
+      <p id="battle-bonus-banner" class="hidden"></p>
+      <div id="battle-scoreboard"></div>
     </div>
 
     <!-- ---- Resultado final de la batalla ---- -->
     <div id="battle-result-overlay" class="hidden">
       <p id="battle-result-text"></p>
+      <div id="battle-result-ranking"></div>
     </div>
 
     <div id="wallet-bar">
@@ -813,7 +875,7 @@
       <p class="settings-label" id="host-guests-toggle-label">Ventanillas abiertas (solo el anfitrión puede prenderlas)</p>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
         <button id="toggle-guests-open-btn" class="hidden" style="width:auto;flex:1;margin:0;">🔒 Abrir para invitados</button>
-        <select id="guests-limit-select" class="hidden" style="width:auto;margin:0;" title="¿Cuántas personas querés recibir en cámara?">
+        <select id="guests-limit-select" class="hidden" style="width:auto;min-width:64px;flex-shrink:0;margin:0;" title="¿Cuántas personas querés recibir en cámara?">
           <option value="1">👤 1</option>
           <option value="2">👥 2</option>
           <option value="3">👥 3</option>
@@ -874,6 +936,7 @@
 
     <div id="live-chat">
       <div id="chat-messages"></div>
+      <div id="mention-suggestions" class="hidden"></div>
       <div id="chat-input-row">
         <input id="chat-input" type="text" placeholder="Escribí un comentario..." data-i18n-placeholder="comment_placeholder" maxlength="200" />
         <button id="chat-send-btn" data-i18n="btn_send">Enviar</button>

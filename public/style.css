@@ -650,14 +650,15 @@ body { overflow-x: hidden; }
 }
 
 .icon-toggle-btn {
-  width: 38px;
-  height: 38px;
-  min-width: 38px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   border-radius: 50%;
-  background: rgba(15, 43, 35, 0.6);
-  border: 1px solid rgba(224,166,62,0.35);
+  background: rgba(15, 43, 35, 0.35);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(224,166,62,0.3);
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   padding: 0;
   margin: 0;
   display: inline-flex;
@@ -860,7 +861,8 @@ body { overflow-x: hidden; }
   width: auto;
   margin: 0;
   padding: 7px 14px;
-  background: rgba(15, 43, 35, 0.75);
+  background: rgba(15, 43, 35, 0.35);
+  backdrop-filter: blur(8px);
   border: 1px solid rgba(224,166,62,0.35);
   border-radius: 20px;
   font-size: 13px;
@@ -1492,13 +1494,17 @@ body { overflow-x: hidden; }
 #battle-bar {
   position: fixed;
   top: 96px;
-  left: 12px;
   right: 12px;
+  left: auto;
+  width: 240px;
   z-index: 22;
-  background: rgba(15, 43, 35, 0.85);
-  border: 1px solid rgba(224,166,62,0.4);
+  background: rgba(15, 43, 35, 0.32);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(224,166,62,0.35);
   border-radius: 14px;
-  padding: 8px 12px;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 #battle-bar-names {
   display: flex;
@@ -1515,21 +1521,40 @@ body { overflow-x: hidden; }
   border-radius: 10px;
   font-size: 11px;
 }
-#battle-bar-track {
-  display: flex;
-  height: 10px;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #0f2b23;
+#battle-scoreboard { display: flex; flex-direction: column; gap: 6px; }
+.battle-scoreboard-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  grid-template-areas: "rank name score" "rank bar bar";
+  align-items: center;
+  gap: 2px 6px;
+  font-size: 11px;
+  color: #cfe3da;
 }
-#battle-bar-fill-me { background: linear-gradient(90deg, #e0a63e, #c98a1f); transition: width 0.4s ease; width: 50%; }
-#battle-bar-fill-opponent { background: linear-gradient(90deg, #5b8ac9, #3a6aa8); transition: width 0.4s ease; width: 50%; }
-#battle-bar-scores { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
-.battle-score-block { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.battle-score-block.leading .battle-score-num { color: #e0a63e; }
-.battle-score-num { font-size: 22px; font-weight: 800; color: #fff; line-height: 1; }
-.battle-score-diamonds { font-size: 10px; color: #9fc9b8; }
-.battle-leading-tag { font-size: 10px; font-weight: 700; color: #e0a63e; margin-top: 2px; }
+.battle-scoreboard-rank { grid-area: rank; font-weight: 700; color: #9fc9b8; }
+.battle-scoreboard-name { grid-area: name; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.battle-scoreboard-score { grid-area: score; font-weight: 700; color: #e0a63e; }
+.battle-scoreboard-bar-track { grid-area: bar; height: 5px; border-radius: 3px; background: #0f2b23; overflow: hidden; }
+.battle-scoreboard-bar-fill { height: 100%; background: linear-gradient(90deg, #e0a63e, #c98a1f); transition: width 0.4s ease; }
+.battle-scoreboard-row.battle-scoreboard-leading .battle-scoreboard-rank { color: #e0a63e; }
+.battle-scoreboard-row.battle-scoreboard-me .battle-scoreboard-name { color: #e0a63e; }
+.battle-top-gifter { grid-column: 1 / -1; font-size: 9px; color: #9fc9b8; }
+
+/* ---------------- Ranking final de la batalla (1°, 2°, 3°...) ---------------- */
+#battle-result-ranking { margin-top: 14px; max-height: 40vh; overflow-y: auto; }
+.battle-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(15,43,35,0.7);
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.battle-rank-medal { font-size: 18px; width: 28px; text-align: center; }
+.battle-rank-name { flex: 1; color: #fff; font-weight: 600; font-size: 13px; }
+.battle-rank-score { color: #e0a63e; font-weight: 700; font-size: 13px; }
+.battle-rank-row.battle-rank-me { border: 1px solid rgba(224,166,62,0.5); }
 
 #battle-result-overlay {
   position: fixed;
@@ -1992,7 +2017,8 @@ body { overflow-x: hidden; }
 }
 #meeting-code-label { font-weight: 700; color: #fff; font-size: 14px; }
 #meeting-timer { background: rgba(220,38,38,0.85); color: #fff; font-size: 12px; padding: 3px 9px; border-radius: 10px; font-weight: 700; }
-#meeting-top-bar button { width: 38px; height: 38px; min-width: 38px; border-radius: 50%; background: rgba(0,0,0,0.4); color: #fff; padding: 0; margin: 0; }
+#meeting-top-bar button { width: 38px; height: 38px; min-width: 38px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(6px); border: 1px solid rgba(224,166,62,0.2); color: #fff; padding: 0; margin: 0; transition: background 0.2s ease; }
+#meeting-top-bar button:active { background: rgba(224,166,62,0.35); }
 #meeting-bottom-bar {
   position: absolute;
   bottom: 14px;
@@ -2008,6 +2034,7 @@ body { overflow-x: hidden; }
   margin: 0;
   border-radius: 24px;
   background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(8px);
   border: 1px solid rgba(224,166,62,0.4);
   color: #fff;
   font-size: 14px;
@@ -2067,6 +2094,11 @@ body { overflow-x: hidden; }
   grid-column: span 2;
   grid-row: span 2;
 }
+/* El anfitrión puede elegir el tamaño de cada video, sin necesidad de "destacarlo" del
+   todo — chico, mediano o grande, como él quiera armar la pantalla. */
+#video-bar:not(.battle-split) .video-tile.tile-size-small { grid-column: span 1; grid-row: span 1; opacity: 0.92; }
+#video-bar:not(.battle-split) .video-tile.tile-size-medium { grid-column: span 2; grid-row: span 1; }
+#video-bar:not(.battle-split) .video-tile.tile-size-large { grid-column: span 2; grid-row: span 2; }
 .on-camera-pill { position: relative; }
 .pill-feature-btn {
   width: 20px;
@@ -2413,3 +2445,234 @@ body { overflow-x: hidden; }
   text-overflow: ellipsis;
   max-width: 62px;
 }
+
+/* ---------------- Banner de regalo cruzando la pantalla, como TikTok ---------------- */
+.gift-banner-fx {
+  position: fixed;
+  left: 0;
+  top: 30%;
+  z-index: 996;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(90deg, rgba(224,166,62,0.95), rgba(224,166,62,0.15));
+  padding: 8px 16px 8px 8px;
+  border-radius: 0 30px 30px 0;
+  animation: giftBannerSlide 3.2s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes giftBannerSlide {
+  0% { transform: translateX(-100%); opacity: 0; }
+  10% { transform: translateX(0); opacity: 1; }
+  80% { transform: translateX(0); opacity: 1; }
+  100% { transform: translateX(0); opacity: 0; }
+}
+.gift-banner-icon {
+  font-size: 30px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gift-banner-text { color: #1c1c1c; font-size: 13px; font-weight: 600; }
+
+/* ---------------- Pizarra opcional de la reunión (clases, cursos virtuales) ---------------- */
+#meeting-whiteboard {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: #0b2e22;
+  display: flex;
+  flex-direction: column;
+}
+#meeting-whiteboard-canvas {
+  flex: 1;
+  width: 100%;
+  touch-action: none;
+  cursor: crosshair;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0px, transparent 1px, transparent 40px),
+    #0b2e22;
+}
+#meeting-whiteboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px;
+  background: rgba(0,0,0,0.35);
+}
+.whiteboard-chalk {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.3);
+  margin: 0;
+  padding: 0;
+}
+.whiteboard-chalk.active { border-color: #e0a63e; box-shadow: 0 0 0 2px rgba(224,166,62,0.5); }
+#whiteboard-eraser, #whiteboard-clear, #whiteboard-close {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  font-size: 15px;
+  margin: 0;
+  padding: 0;
+}
+#whiteboard-eraser.active { background: rgba(224,166,62,0.9); }
+
+/* ---------------- Entrada moderna a la reunión (estética tecnología/IA) ---------------- */
+#meeting-entry-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: radial-gradient(circle at 50% 40%, #0f3d2e 0%, #010806 75%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  overflow: hidden;
+  transition: opacity 0.5s ease;
+}
+#meeting-entry-fx.fade-out { opacity: 0; }
+#meeting-entry-rings {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.meeting-entry-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid rgba(224,166,62,0.55);
+  border-radius: 50%;
+  animation: meetingRingPulse 2.4s ease-out infinite;
+}
+.meeting-entry-ring:nth-child(2) { animation-delay: 0.7s; border-color: rgba(31,174,122,0.55); }
+.meeting-entry-ring:nth-child(3) { animation-delay: 1.4s; border-color: rgba(224,166,62,0.35); }
+@keyframes meetingRingPulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+#meeting-entry-core {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1fae7a, #0b3d2e);
+  border: 1.5px solid rgba(224,166,62,0.7);
+  color: #f4cf6a;
+  font-weight: 800;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 30px rgba(224,166,62,0.35);
+  animation: meetingCorePulse 1.6s ease-in-out infinite;
+}
+@keyframes meetingCorePulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(224,166,62,0.3); }
+  50% { box-shadow: 0 0 40px rgba(224,166,62,0.55); }
+}
+#meeting-entry-status {
+  color: #cfe3da;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  min-height: 18px;
+}
+#meeting-entry-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(31,174,122,0.8), transparent);
+  animation: meetingScanline 2.6s linear infinite;
+}
+@keyframes meetingScanline {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+
+/* ---------------- Etiquetar personas con @ (como TikTok) ---------------- */
+#mention-suggestions, #post-comment-mention-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: #1c473c;
+  border: 1px solid #2f6b58;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  z-index: 30;
+}
+.mention-suggestion-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #e0a63e;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mention-suggestion-row:active { background: rgba(224,166,62,0.15); }
+.mention-tag { color: #e0a63e; font-weight: 700; cursor: pointer; }
+#chat-input-row, #post-comments-input-row { position: relative; }
+
+/* ---------------- Bonus de la batalla: doble puntos sorpresa y PK Final ---------------- */
+#battle-bonus-banner {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 8px;
+  margin: 4px 0 8px;
+  line-height: 1.3;
+}
+#battle-bonus-banner.battle-bonus-double {
+  background: rgba(224,166,62,0.2);
+  color: #f4cf6a;
+  border: 1px solid rgba(224,166,62,0.5);
+  animation: battleBonusPulse 1s ease-in-out infinite;
+}
+#battle-bonus-banner.battle-bonus-pkfinal {
+  background: rgba(220,38,38,0.25);
+  color: #ff8a80;
+  border: 1px solid rgba(220,38,38,0.5);
+  animation: battleBonusPulse 0.8s ease-in-out infinite;
+}
+@keyframes battleBonusPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* ---------------- Reglas y Términos de uso ---------------- */
+#terms-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+#terms-card {
+  max-width: 520px;
+  width: 100%;
+  max-height: 82vh;
+  overflow-y: auto;
+  position: relative;
+}
+#terms-content p { font-size: 13px; color: #cfe3da; line-height: 1.5; }
+#terms-content .settings-label { margin-top: 14px; }

@@ -300,10 +300,16 @@ const GEM_PACKS = {
   p6: { gems: 1000, usd: "10.00", symbol: "🐺", label: "Lobo" },
   p7: { gems: 1500, usd: "15.00", symbol: "🦁", label: "León" },
   p8: { gems: 2000, usd: "20.00", symbol: "🐴", label: "Caballo" },
+  p8b: { gems: 2500, usd: "25.00", symbol: "🐷", label: "Chancho" },
   p9: { gems: 3000, usd: "30.00", symbol: "🐮", label: "Vaca" },
   p10: { gems: 4000, usd: "40.00", symbol: "🐘", label: "Elefante" },
   p11: { gems: 5000, usd: "50.00", symbol: "🦈", label: "Tiburón" },
+  p11b: { gems: 6000, usd: "60.00", symbol: "🐋", label: "Ballena" },
+  p11c: { gems: 7000, usd: "70.00", symbol: "🦅", label: "Águila" },
   p12: { gems: 7500, usd: "75.00", symbol: "🌙", label: "Luna" },
+  p12b: { gems: 8000, usd: "80.00", symbol: "🐉", label: "Dragón" },
+  p12c: { gems: 9000, usd: "90.00", symbol: "🦄", label: "Unicornio" },
+  p12d: { gems: 9500, usd: "95.00", symbol: "👑", label: "Corona" },
   p13: { gems: 10000, usd: "100.00", symbol: "☀️", label: "Sol" },
   p14: { gems: 15000, usd: "150.00", symbol: "🪐", label: "Saturno" },
   p15: { gems: 25000, usd: "250.00", symbol: "🌍", label: "Tierra" },
@@ -402,8 +408,10 @@ function giftStatsFor(email) {
 // Nivel simple, con curva de raíz cuadrada (cada nivel cuesta un poco más que el anterior)
 // basado en cuánto recibió en regalos a lo largo del tiempo y cuántos seguidores tiene.
 function calculateLevel(totalReceived, followerCount) {
+  // Cada 1000 puntos (diamantes recibidos + seguidores, contando cada seguidor como 5)
+  // sube un nivel — simple y directo, sin curva rara.
   const points = totalReceived + followerCount * 5;
-  return Math.max(1, Math.floor(Math.sqrt(points / 10)) + 1);
+  return Math.max(1, Math.floor(points / 1000) + 1);
 }
 function loadReports() {
   try { return JSON.parse(fs.readFileSync(REPORTS_FILE, "utf8")); } catch (e) { return []; }
@@ -1227,6 +1235,9 @@ app.get("/api/users/:email/profile", authMiddleware, (req, res) => {
     frameCssClass: equipped.frame && STORE_ITEMS[equipped.frame] ? STORE_ITEMS[equipped.frame].cssClass : null,
     level: calculateLevel(gifts.totalReceived, followerCount),
     gifts,
+    dominoWins: user.dominoWins || 0,
+    hasTrophy10Wins: !!user.hasTrophy10Wins,
+    totalEarnedDiamonds: gifts.totalReceived, // lo que ganó en total con regalos, de por vida (no baja al retirar)
   });
 });
 
@@ -1259,7 +1270,10 @@ app.post("/api/posts/:id/comment", authMiddleware, (req, res) => {
     return res.status(403).json({ error: "No podés comentar en esta publicación." });
   }
   if (!post.comments) post.comments = [];
-  const comment = { name: req.user.name, email: req.user.email, text, createdAt: new Date().toISOString() };
+  const cleanMentions = Array.isArray(req.body.mentions)
+    ? req.body.mentions.filter((m) => m && m.email && m.name && users[m.email]).slice(0, 5).map((m) => ({ name: m.name, email: m.email }))
+    : [];
+  const comment = { name: req.user.name, email: req.user.email, text, createdAt: new Date().toISOString(), mentions: cleanMentions };
   post.comments.push(comment);
   savePosts(posts);
   res.json({ ok: true, comment, commentCount: post.comments.length });
@@ -2202,8 +2216,14 @@ app.get("/api/room-status/:code", (req, res) => {
 });
 
 app.get("/api/live-rooms", (req, res) => {
+  // OJO: "started" es específico del juego de dominó (se pone en true recién cuando
+  // se llenan los 2-4 asientos) — pero una transmisión ya está EN VIVO desde el
+  // momento en que alguien toca "Ir en vivo", aunque todavía no se haya sentado nadie
+  // más a jugar. Por eso acá usamos liveStartedAt (se marca al crear la sala), no
+  // started — si no, una transmisión sin la mesa llena nunca aparecía como "en vivo"
+  // en ningún lado (ni en el feed, ni para batalla, ni en buscar).
   const list = Object.values(rooms)
-    .filter((r) => r.started && !r.finished)
+    .filter((r) => r.liveStartedAt && !r.finished)
     .map((r) => ({
       code: r.code,
       players: r.seats.map((s) => s.name).filter(Boolean),
@@ -2270,29 +2290,36 @@ function hasActiveMeetingPlan(user) {
   if (user && user.isPlatformOwner) return true; // el dueño de la plataforma nunca tiene límite de tiempo
   return !!(user && user.meetingPlan && user.meetingPlan.expiresAt && new Date(user.meetingPlan.expiresAt).getTime() > Date.now());
 }
-const battles = {}; // battleId -> { id, roomA, roomB, scoreA, scoreB, startedAt, durationSeconds, ended, timeout }
-const pendingBattleInvites = {}; // código de sala destino -> { fromCode, fromName, durationSeconds, expiresAt }
+const battles = {}; // battleId -> { id, roomCodes: [...hasta 10], scores: {code: puntos}, gifters: {code: {email: puntos}}, startedAt, durationSeconds, ended, timeout }
+const pendingBattleInvites = {}; // código de sala destino -> { groupId, fromCode, fromName, durationSeconds, autoRematchMinutes, expiresAt }
+const pendingGroupBattles = {}; // groupId -> { hostCode, hostName, invitedCodes, acceptedCodes, durationSeconds, autoRematchMinutes, createdAt }
 
 function emptySeats(capacity) {
   return Array.from({ length: capacity }, () => ({ name: null, email: null, socketId: null, connected: false, hand: [] }));
 }
 
+// Devuelve la info de la batalla grupal (hasta 10 personas) tal como la ve ESTA sala en
+// particular: su propio puntaje, y la lista de todos los demás participantes con el
+// suyo, para armar el marcador de varios cuadros a la vez.
 function publicBattleFor(room) {
   if (!room.activeBattleId) return null;
   const b = battles[room.activeBattleId];
   if (!b) return null;
-  const isA = b.roomA === room.code;
-  const opponentCode = isA ? b.roomB : b.roomA;
-  const opponentRoom = rooms[opponentCode];
-  const opponentSeat = opponentRoom ? opponentRoom.seats.find((s) => s.name) : null;
+  const participants = b.roomCodes.map((code) => {
+    const r = rooms[code];
+    const seat = r ? r.seats.find((s) => s.name) : null;
+    return {
+      roomCode: code,
+      name: seat ? seat.name : "Anfitrión",
+      score: b.scores[code] || 0,
+      topGifter: topGifterName(b.gifters[code], r),
+      isMe: code === room.code,
+    };
+  }).sort((a, b2) => b2.score - a.score);
   return {
     id: b.id,
-    opponentCode,
-    opponentName: opponentSeat ? opponentSeat.name : "Rival",
-    myScore: isA ? b.scoreA : b.scoreB,
-    opponentScore: isA ? b.scoreB : b.scoreA,
-    myTopGifter: topGifterName(isA ? b.giftersA : b.giftersB, room),
-    opponentTopGifter: opponentRoom ? topGifterName(isA ? b.giftersB : b.giftersA, opponentRoom) : null,
+    participants,
+    myScore: b.scores[room.code] || 0,
     startedAt: b.startedAt,
     durationSeconds: b.durationSeconds,
     ended: !!b.ended,
@@ -2332,33 +2359,73 @@ function publicState(room) {
       avatarUrl: g.email && users[g.email] ? (users[g.email].avatarUrl || "") : "",
     })),
     featuredEmail: room.featuredEmail || null,
+    tileSizes: room.tileSizes || {},
     guestsOpen: !!room.guestsOpen,
     guestsLimit: room.guestsLimit || 10,
     commentsClosed: !!room.commentsClosed,
   };
 }
 
-function startBattle(roomA, roomB, durationSeconds, autoRematchMinutes) {
+// Arranca la batalla grupal de verdad, con todas las salas que hayan aceptado hasta
+// ese momento (entre 2 y 10). A partir de acá todas quedan "ocupadas" en la misma
+// batalla compartida.
+function startGroupBattle(roomCodes, durationSeconds, autoRematchMinutes) {
+  console.log("[BATALLA] ✅✅ startGroupBattle EJECUTADO con las salas:", roomCodes, "- duración:", durationSeconds, "seg");
   const id = "battle_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  const scores = {}, gifters = {};
+  roomCodes.forEach((code) => { scores[code] = 0; gifters[code] = {}; });
   const battle = {
-    id, roomA: roomA.code, roomB: roomB.code, scoreA: 0, scoreB: 0,
-    giftersA: {}, giftersB: {}, // email -> total regalado de ese lado (para la espada del que más regala)
+    id, roomCodes, scores, gifters,
     startedAt: Date.now(), durationSeconds, ended: false, timeout: null,
     autoRematchMinutes: autoRematchMinutes || null,
+    doublePointsActive: false,
+    pkFinalActive: false,
   };
   battles[id] = battle;
-  roomA.activeBattleId = id;
-  roomB.activeBattleId = id;
+  roomCodes.forEach((code) => {
+    const r = rooms[code];
+    if (!r) { console.log("[BATALLA] OJO: la sala", code, "no existe más, no se le pudo activar la batalla."); return; }
+    r.activeBattleId = id;
+    broadcastState(r);
+  });
   battle.timeout = setTimeout(() => endBattle(id), durationSeconds * 1000);
-  broadcastState(roomA);
-  broadcastState(roomB);
+
+  // "Doble puntos" sorpresa: solo en batallas de 2 minutos o más (en una de 1 min no
+  // da tiempo a nada), aparece una sola vez en algún momento entre el 25% y el 65%
+  // del tiempo, dura 12 segundos, y multiplica x2 lo que se regale mientras dure.
+  if (durationSeconds >= 120) {
+    const earliestMs = durationSeconds * 1000 * 0.25;
+    const latestMs = durationSeconds * 1000 * 0.65;
+    const triggerAt = earliestMs + Math.random() * (latestMs - earliestMs);
+    setTimeout(() => {
+      if (battle.ended) return;
+      battle.doublePointsActive = true;
+      battle.roomCodes.forEach((code) => { if (rooms[code]) io.to(rooms[code].code).emit("battleDoublePoints", { active: true }); });
+      setTimeout(() => {
+        if (battle.ended) return;
+        battle.doublePointsActive = false;
+        battle.roomCodes.forEach((code) => { if (rooms[code]) io.to(rooms[code].code).emit("battleDoublePoints", { active: false }); });
+      }, 12000);
+    }, triggerAt);
+  }
+
+  // "PK Final": últimos segundos de la batalla (el 20% final, mínimo 15 segundos)
+  // multiplican x1.5 lo que se regale — para que se sienta la tensión del cierre,
+  // como pasa en TikTok.
+  const pkFinalMs = Math.max(15000, durationSeconds * 1000 * 0.2);
+  const pkFinalTriggerAt = Math.max(0, durationSeconds * 1000 - pkFinalMs);
+  setTimeout(() => {
+    if (battle.ended) return;
+    battle.pkFinalActive = true;
+    battle.roomCodes.forEach((code) => { if (rooms[code]) io.to(rooms[code].code).emit("battlePkFinal", { active: true }); });
+  }, pkFinalTriggerAt);
 }
 
 function topGifterName(gifters, room) {
   const entries = Object.entries(gifters || {});
   if (!entries.length) return null;
   const [topEmail] = entries.sort((a, b) => b[1] - a[1])[0];
-  const seat = room.seats.find((s) => s.email === topEmail);
+  const seat = room ? room.seats.find((s) => s.email === topEmail) : null;
   if (seat) return seat.name;
   const user = users[topEmail];
   return user ? user.name : null;
@@ -2369,29 +2436,26 @@ function endBattle(id) {
   if (!b || b.ended) return;
   b.ended = true;
   if (b.timeout) clearTimeout(b.timeout);
-  const roomA = rooms[b.roomA];
-  const roomB = rooms[b.roomB];
-  if (roomA) broadcastState(roomA);
-  if (roomB) broadcastState(roomB);
-  // Dejamos el resultado final a la vista unos segundos antes de volver todo a la normalidad
+  b.roomCodes.forEach((code) => { if (rooms[code]) broadcastState(rooms[code]); });
+  // Dejamos el resultado final (con el 1°, 2°, 3°...) a la vista unos segundos antes
+  // de volver todo a la normalidad.
   setTimeout(() => {
     delete battles[id];
-    if (rooms[b.roomA]) { rooms[b.roomA].activeBattleId = null; broadcastState(rooms[b.roomA]); }
-    if (rooms[b.roomB]) { rooms[b.roomB].activeBattleId = null; broadcastState(rooms[b.roomB]); }
+    b.roomCodes.forEach((code) => {
+      if (rooms[code]) { rooms[code].activeBattleId = null; broadcastState(rooms[code]); }
+    });
 
-    // Relanzamiento automático: si quien desafió eligió que se repita sola después de
-    // X minutos, la programamos acá — pero solo si las dos transmisiones siguen en
-    // vivo y ninguna quedó ocupada en otra batalla mientras tanto.
+    // Relanzamiento automático: si quien armó la batalla eligió que se repita sola
+    // después de X minutos, la programamos acá — pero solo con las salas que sigan
+    // en vivo y libres en ese momento.
     if (b.autoRematchMinutes) {
       setTimeout(() => {
-        const freshA = rooms[b.roomA];
-        const freshB = rooms[b.roomB];
-        if (!freshA || !freshB) return; // alguna de las dos ya no está en vivo
-        if (freshA.activeBattleId || freshB.activeBattleId) return; // ya está ocupada en otra batalla
-        startBattle(freshA, freshB, b.durationSeconds, b.autoRematchMinutes);
+        const freshCodes = b.roomCodes.filter((code) => rooms[code] && !rooms[code].activeBattleId);
+        if (freshCodes.length < 2) return; // ya no quedan suficientes para relanzar
+        startGroupBattle(freshCodes, b.durationSeconds, b.autoRematchMinutes);
       }, b.autoRematchMinutes * 60 * 1000);
     }
-  }, 8000);
+  }, 10000);
 }
 
 function broadcastState(room) { io.to(room.code).emit("state", publicState(room)); }
@@ -2455,6 +2519,20 @@ function endGame(room, seatIndex, reason) {
   room.finished = true;
   const seat = room.seats[seatIndex];
   room.winner = { seatIndex, name: seat ? seat.name : null, reason, ranking: buildRanking(room, seatIndex) };
+
+  // Le contamos la victoria a quien ganó, y si llega a 10, le damos el trofeo
+  // automáticamente — aparece solo en su perfil, sin que nadie tenga que hacer nada.
+  if (seat && seat.email && users[seat.email]) {
+    const winner = users[seat.email];
+    winner.dominoWins = (winner.dominoWins || 0) + 1;
+    if (winner.dominoWins >= 10 && !winner.hasTrophy10Wins) {
+      winner.hasTrophy10Wins = true;
+      const winnerSocket = seat.socketId ? io.sockets.sockets.get(seat.socketId) : null;
+      if (winnerSocket) winnerSocket.emit("trophyEarned", { wins: winner.dominoWins });
+    }
+    saveUsers(users);
+  }
+
   broadcastState(room);
 }
 function resolveBlockedGame(room) {
@@ -2526,6 +2604,13 @@ function assignSeat(socket, room) {
   seat.socketId = socket.id;
   seat.connected = true;
   if (isFreshSeat) seat.hand = [];
+
+  // Si esta persona ya estaba en la lista de invitados de cámara (TableUp) y ahora se
+  // sienta a jugar, la sacamos de esa lista — si no, queda apareciendo dos veces: una
+  // vez como jugador y otra como invitado, con controles distintos y confusos.
+  if (room.cameraGuests && email) {
+    room.cameraGuests = room.cameraGuests.filter((g) => g.email !== email);
+  }
 
   socket.data.roomCode = room.code;
   socket.data.seatIndex = seatIdx;
@@ -2688,6 +2773,20 @@ io.on("connection", (socket) => {
     socket.to("meeting:" + m.code).emit("meetingRoster", meetingSummary(m));
   });
 
+  // Pizarra opcional de la reunión — lo que dibuja cualquiera lo ven todos los demás
+  // en tiempo real, para clases o cursos virtuales. No guardamos el dibujo en disco,
+  // solo se retransmite mientras la reunión está en curso.
+  socket.on("meetingWhiteboardDraw", (stroke) => {
+    const code = socket.data.meetingCode;
+    if (!code || !meetings[code]) return;
+    socket.to("meeting:" + code).emit("meetingWhiteboardDraw", stroke);
+  });
+  socket.on("meetingWhiteboardClear", () => {
+    const code = socket.data.meetingCode;
+    if (!code || !meetings[code]) return;
+    socket.to("meeting:" + code).emit("meetingWhiteboardClear");
+  });
+
   socket.on("leaveMeeting", () => {
     const code = socket.data.meetingCode;
     if (!code || !meetings[code]) return;
@@ -2780,41 +2879,125 @@ io.on("connection", (socket) => {
   });
 
   // ---------------- Batallas LIVE: dos transmisiones compiten por regalos ----------------
-  socket.on("inviteBattle", ({ targetCode, durationSeconds, autoRematchMinutes }) => {
+  // El anfitrión elige VARIAS transmisiones (hasta 9 más, o sea hasta 10 en total con
+  // la suya) y les manda una invitación a cada una por separado.
+  socket.on("inviteBattleGroup", ({ targetCodes, durationSeconds, autoRematchMinutes }) => {
     if (!requireAuth(socket)) return;
     const room = rooms[socket.data.roomCode];
-    if (!room) { socket.emit("errorMsg", "Tenés que estar en una sala para invitar a batalla."); return; }
-    const target = rooms[(targetCode || "").toUpperCase()];
-    if (!target) { socket.emit("errorMsg", "Esa transmisión ya no está disponible."); return; }
-    if (target.code === room.code) { socket.emit("errorMsg", "No te podés desafiar a vos mismo."); return; }
+    if (!room) { socket.emit("errorMsg", "Tenés que estar en una sala para armar una batalla."); return; }
     if (room.activeBattleId) { socket.emit("errorMsg", "Tu transmisión ya está en una batalla."); return; }
-    if (target.activeBattleId) { socket.emit("errorMsg", "Esa transmisión ya está en otra batalla."); return; }
+    const codes = [...new Set((targetCodes || []).map((c) => (c || "").toUpperCase()))]
+      .filter((c) => c !== room.code && rooms[c] && !rooms[c].activeBattleId)
+      .slice(0, 9); // hasta 9 invitados + el anfitrión = 10 en total
+    if (!codes.length) { socket.emit("errorMsg", "Elegí al menos una transmisión para invitar."); return; }
     const dur = [60, 120, 180, 300].includes(durationSeconds) ? durationSeconds : 180;
     const rematch = [1, 2, 3, 5, 10].includes(autoRematchMinutes) ? autoRematchMinutes : null;
     const fromName = displayNameFor(socket);
-    pendingBattleInvites[target.code] = { fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch, expiresAt: Date.now() + 30000 };
-    io.to(target.code).emit("battleInvited", { fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch });
-    socket.emit("battleInviteSent", { targetCode: target.code });
+    const groupId = "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    pendingGroupBattles[groupId] = {
+      hostCode: room.code, hostName: fromName, invitedCodes: codes, acceptedCodes: [room.code],
+      declinedCodes: [], durationSeconds: dur, autoRematchMinutes: rematch, createdAt: Date.now(),
+    };
+    codes.forEach((code) => {
+      pendingBattleInvites[code] = { groupId, fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch, expiresAt: Date.now() + 30000 };
+      io.to(code).emit("battleInvited", { groupId, fromCode: room.code, fromName, durationSeconds: dur, autoRematchMinutes: rematch });
+    });
+    socket.emit("battleGroupInviteSent", { groupId, invitedCount: codes.length });
   });
 
   socket.on("respondBattleInvite", ({ accept }) => {
+    console.log("[BATALLA] respondBattleInvite — accept:", accept, "- mi sala:", socket.data.roomCode);
+    if (!requireAuth(socket)) { console.log("[BATALLA] RECHAZADO: no está autenticado."); return; }
+    const room = rooms[socket.data.roomCode];
+    if (!room) { console.log("[BATALLA] RECHAZADO: no se encontró mi sala."); return; }
+    const invite = pendingBattleInvites[room.code];
+    if (!invite || invite.expiresAt < Date.now()) { console.log("[BATALLA] RECHAZADO: no hay invitación pendiente para esta sala, o ya venció."); delete pendingBattleInvites[room.code]; return; }
+    delete pendingBattleInvites[room.code];
+    const group = pendingGroupBattles[invite.groupId];
+    const hostRoom = rooms[invite.fromCode];
+    if (!group || !hostRoom) { console.log("[BATALLA] RECHAZADO: la sala de quien invitó ya no existe."); socket.emit("errorMsg", "Esa transmisión ya no está disponible."); return; }
+    if (!accept) {
+      console.log("[BATALLA] Rechazada la invitación.");
+      group.declinedCodes.push(room.code);
+      io.to(hostRoom.code).emit("battleDeclined", { byName: displayNameFor(socket) });
+      return;
+    }
+    if (room.activeBattleId) { console.log("[BATALLA] RECHAZADO: mi sala ya está en otra batalla."); socket.emit("errorMsg", "Tu transmisión ya está en otra batalla."); return; }
+    if (!group.acceptedCodes.includes(room.code)) group.acceptedCodes.push(room.code);
+
+    // Si esto vino de un pedido directo (1 a 1, no un grupo armado por el anfitrión),
+    // arranca sola apenas la acepten — no hace falta esperar a que nadie apriete
+    // "iniciar batalla" aparte.
+    if (group.autoStartOnAccept) {
+      console.log("[BATALLA] ✅ Aceptado un pedido directo — arrancando la batalla ahora entre:", group.acceptedCodes);
+      delete pendingGroupBattles[invite.groupId];
+      if (pendingBattleInvites[room.code] && pendingBattleInvites[room.code].groupId === invite.groupId) delete pendingBattleInvites[room.code];
+      startGroupBattle(group.acceptedCodes, group.durationSeconds, group.autoRematchMinutes);
+      return;
+    }
+
+    console.log("[BATALLA] Aceptado, sumado al grupo. Total aceptados:", group.acceptedCodes);
+    // Le avisamos al anfitrión (y a todos los que ya aceptaron) quién se sumó, para que
+    // vea la lista crecer en tiempo real y decida cuándo arrancar.
+    const rosterNames = group.acceptedCodes.map((c) => {
+      const r = rooms[c];
+      const seat = r ? r.seats.find((s) => s.name) : null;
+      return seat ? seat.name : "Anfitrión";
+    });
+    group.acceptedCodes.forEach((c) => io.to(c).emit("battleGroupRosterUpdate", { groupId: invite.groupId, roster: rosterNames }));
+  });
+
+  // El anfitrión decide cuándo arrancar — no hace falta que todos los invitados
+  // respondan, arranca con los que ya aceptaron hasta ese momento (mínimo 2 en total).
+  socket.on("startGroupBattle", ({ groupId }) => {
     if (!requireAuth(socket)) return;
     const room = rooms[socket.data.roomCode];
-    if (!room) return;
-    const invite = pendingBattleInvites[room.code];
-    if (!invite || invite.expiresAt < Date.now()) { delete pendingBattleInvites[room.code]; return; }
-    delete pendingBattleInvites[room.code];
-    const challenger = rooms[invite.fromCode];
-    if (!challenger) { socket.emit("errorMsg", "Esa transmisión ya no está disponible."); return; }
-    if (!accept) {
-      io.to(challenger.code).emit("battleDeclined", { byName: displayNameFor(socket) });
+    const group = pendingGroupBattles[groupId];
+    if (!room || !group || group.hostCode !== room.code) { socket.emit("errorMsg", "No se pudo iniciar la batalla."); return; }
+    const readyCodes = group.acceptedCodes.filter((c) => rooms[c] && !rooms[c].activeBattleId);
+    if (readyCodes.length < 2) { socket.emit("errorMsg", "Necesitás que al menos una persona más haya aceptado."); return; }
+    delete pendingGroupBattles[groupId];
+    group.invitedCodes.forEach((c) => { if (pendingBattleInvites[c] && pendingBattleInvites[c].groupId === groupId) delete pendingBattleInvites[c]; });
+    startGroupBattle(readyCodes, group.durationSeconds, group.autoRematchMinutes);
+  });
+
+  // Al revés de invitar: acá quien PIDE la batalla es alguien que está mirando (o
+  // jugando) en la sala de otra persona, pero que TAMBIÉN tiene su propia transmisión
+  // en vivo corriendo en otro lado (en otra pestaña) — le pide al anfitrión de acá
+  // si quiere batallar con él. Mismo patrón que pedir TableUp: solicitar y esperar
+  // que el otro acepte o rechace.
+  socket.on("requestBattleFromViewer", ({ durationSeconds, autoRematchMinutes }) => {
+    console.log("[BATALLA] requestBattleFromViewer — socket.data.roomCode:", socket.data.roomCode, "userEmail:", socket.data.userEmail);
+    if (!requireAuth(socket)) { console.log("[BATALLA] RECHAZADO: no está autenticado (no inició sesión)."); return; }
+    const targetRoom = rooms[socket.data.roomCode];
+    if (!targetRoom) { console.log("[BATALLA] RECHAZADO: no se encontró la sala actual (socket.data.roomCode no coincide con ninguna sala activa)."); socket.emit("errorMsg", "No estás en ninguna transmisión ahora mismo."); return; }
+    console.log("[BATALLA] Sala donde estoy mirando/jugando:", targetRoom.code, "- ya tiene batalla activa:", !!targetRoom.activeBattleId);
+    if (targetRoom.activeBattleId) { socket.emit("errorMsg", "Esa transmisión ya está en una batalla."); return; }
+    const myEmail = socket.data.userEmail;
+    if (!myEmail) { console.log("[BATALLA] RECHAZADO: socket.data.userEmail está vacío."); socket.emit("errorMsg", "Tenés que iniciar sesión para pedir una batalla."); return; }
+    const myOwnRoomCode = liveUsers[myEmail];
+    console.log("[BATALLA] Mi email:", myEmail, "- liveUsers dice que estoy en la sala:", myOwnRoomCode || "(ninguna)");
+    const myOwnRoom = myOwnRoomCode ? rooms[myOwnRoomCode] : null;
+    const amIHostOfMyOwn = myOwnRoom && myOwnRoom.seats[0] && myOwnRoom.seats[0].email === myEmail;
+    console.log("[BATALLA] ¿Esa sala existe todavía?:", !!myOwnRoom, "- ¿Soy el anfitrión (asiento 0) de esa sala?:", amIHostOfMyOwn, "- ¿Es la misma sala que estoy mirando?:", myOwnRoomCode === targetRoom.code);
+    if (!amIHostOfMyOwn || myOwnRoomCode === targetRoom.code) {
+      console.log("[BATALLA] RECHAZADO: no sos anfitrión de tu propia sala en otra pestaña, o es la misma sala.");
+      socket.emit("errorMsg", "Para pedir una batalla, primero tenés que tener tu propia transmisión en vivo corriendo (en otra pestaña).");
       return;
     }
-    if (room.activeBattleId || challenger.activeBattleId) {
-      socket.emit("errorMsg", "Una de las dos transmisiones ya está en otra batalla.");
-      return;
-    }
-    startBattle(challenger, room, invite.durationSeconds, invite.autoRematchMinutes);
+    if (myOwnRoom.activeBattleId) { console.log("[BATALLA] RECHAZADO: mi propia sala ya está en otra batalla."); socket.emit("errorMsg", "Tu transmisión ya está en una batalla."); return; }
+    const dur = [60, 120, 180, 300].includes(durationSeconds) ? durationSeconds : 180;
+    const rematch = [1, 2, 3, 5, 10].includes(autoRematchMinutes) ? autoRematchMinutes : null;
+    const groupId = "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    pendingGroupBattles[groupId] = {
+      hostCode: myOwnRoom.code, hostName: displayNameFor(socket), invitedCodes: [targetRoom.code],
+      acceptedCodes: [myOwnRoom.code], declinedCodes: [], durationSeconds: dur, autoRematchMinutes: rematch, createdAt: Date.now(),
+      autoStartOnAccept: true, // esto es un pedido directo 1 a 1, no un grupo que el anfitrión arranca cuando quiere
+    };
+    pendingBattleInvites[targetRoom.code] = { groupId, fromCode: myOwnRoom.code, fromName: displayNameFor(socket), durationSeconds: dur, autoRematchMinutes: rematch, expiresAt: Date.now() + 30000 };
+    io.to(targetRoom.code).emit("battleInvited", { groupId, fromCode: myOwnRoom.code, fromName: displayNameFor(socket), durationSeconds: dur, autoRematchMinutes: rematch });
+    socket.emit("battleRequestSent", { targetHostName: (targetRoom.seats[0] && targetRoom.seats[0].name) || "el anfitrión" });
+    console.log("[BATALLA] ✅ ÉXITO: pedido mandado de", myOwnRoom.code, "hacia", targetRoom.code, "- groupId:", groupId);
   });
 
   // Cualquiera puede mirar en vivo, sin necesitar cuenta
@@ -2893,7 +3076,7 @@ io.on("connection", (socket) => {
     if (!room) return;
     // Solo un jugador de la mesa (o alguien puesto como admin del live) puede aprobar
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
 
@@ -2920,7 +3103,7 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     if (!room.cameraGuests) return;
@@ -2942,7 +3125,7 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     const roomSockets = io.sockets.adapter.rooms.get(room.code);
@@ -2959,7 +3142,7 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     if (!isPlayer) return; // solo un jugador de la mesa puede nombrar administradores
     if (!room.liveAdmins) room.liveAdmins = [];
     if (!room.liveAdmins.includes(name)) room.liveAdmins.push(name);
@@ -2972,10 +3155,28 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     room.featuredEmail = email || null;
+    broadcastState(room);
+  });
+
+  // El anfitrión elige el tamaño de cada video (chico, mediano o grande) — no es todo
+  // o nada como "destacar", acá se puede armar la pantalla como él quiera.
+  socket.on("setTileSize", ({ email, size }) => {
+    const room = rooms[socket.data.roomCode];
+    if (!room || !email) return;
+    const myDisplayName = displayNameFor(socket);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real
+    const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
+    if (!isPlayer && !isLiveAdmin) return;
+    if (!room.tileSizes) room.tileSizes = {};
+    if (!["small", "medium", "large"].includes(size)) {
+      delete room.tileSizes[email]; // tamaño normal, sin marcar nada
+    } else {
+      room.tileSizes[email] = size;
+    }
     broadcastState(room);
   });
 
@@ -2985,7 +3186,7 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     room.guestsOpen = !!open;
@@ -2999,7 +3200,8 @@ io.on("connection", (socket) => {
   // ---------------- Moderación del live: borrar comentarios, silenciar, expulsar ----------------
   function isModerator(socket, room) {
     const myDisplayName = displayNameFor(socket);
-    return room.seats.some((s) => s.name === myDisplayName) || (room.liveAdmins || []).includes(myDisplayName);
+    const isHost = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0)
+    return isHost || (room.liveAdmins || []).includes(myDisplayName);
   }
 
   socket.on("deleteComment", ({ ts }) => {
@@ -3075,10 +3277,21 @@ io.on("connection", (socket) => {
     if (!seat || !seat.name) return;
     room.likes[toSeatIndex] = (room.likes[toSeatIndex] || 0) + 1;
     io.to(room.code).emit("likeEvent", { toSeatIndex, from: displayNameFor(socket), total: room.likes[toSeatIndex] });
+
+    // Como el "Tap" de TikTok: cada toque de corazón suma un puntito a la batalla —
+    // mucho menos que un regalo, pero es una forma gratis de ayudar a quien mirás.
+    if (room.activeBattleId) {
+      const b = battles[room.activeBattleId];
+      if (b && !b.ended && b.roomCodes.includes(room.code)) {
+        b.scores[room.code] = (b.scores[room.code] || 0) + 1;
+        b.roomCodes.forEach((code) => { if (rooms[code]) broadcastState(rooms[code]); });
+        return; // ya mandamos el estado actualizado a todos, no hace falta de nuevo abajo
+      }
+    }
     broadcastState(room);
   });
 
-  socket.on("sendComment", ({ text }) => {
+  socket.on("sendComment", ({ text, mentions }) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const clean = (text || "").trim().slice(0, 200);
@@ -3102,7 +3315,13 @@ io.on("connection", (socket) => {
     const equipped = (u && u.equipped) || {};
     const badge = equipped.badge && STORE_ITEMS[equipped.badge] ? STORE_ITEMS[equipped.badge].emoji : null;
     const nameColor = equipped.color && STORE_ITEMS[equipped.color] ? STORE_ITEMS[equipped.color].value : null;
-    const comment = { name: senderName, text: clean, ts: Date.now(), badge, nameColor, email: socket.data.userEmail || null };
+    // Las menciones (@alguien) vienen del cliente ya resueltas a un email real —
+    // se guardan aparte del texto para que se puedan mostrar tocables después,
+    // sin depender de adivinar el nombre dentro del texto del mensaje.
+    const cleanMentions = Array.isArray(mentions)
+      ? mentions.filter((m) => m && m.email && m.name && users[m.email]).slice(0, 5).map((m) => ({ name: m.name, email: m.email }))
+      : [];
+    const comment = { name: senderName, text: clean, ts: Date.now(), badge, nameColor, email: socket.data.userEmail || null, mentions: cleanMentions };
     room.comments.push(comment);
     if (room.comments.length > 50) room.comments.shift();
     io.to(room.code).emit("commentEvent", comment);
@@ -3113,7 +3332,7 @@ io.on("connection", (socket) => {
     const room = rooms[socket.data.roomCode];
     if (!room) return;
     const myDisplayName = displayNameFor(socket);
-    const isPlayer = room.seats.some((s) => s.name === myDisplayName);
+    const isPlayer = room.seats[0] && room.seats[0].name === myDisplayName; // solo el anfitrión real (asiento 0), no cualquier jugador sentado
     const isLiveAdmin = (room.liveAdmins || []).includes(myDisplayName);
     if (!isPlayer && !isLiveAdmin) return;
     room.commentsClosed = !!closed;
@@ -3154,22 +3373,25 @@ io.on("connection", (socket) => {
       const recSocket = io.sockets.sockets.get(toSeat.socketId);
       if (recSocket) recSocket.emit("balance", { coins: receiver.coinBalance, diamonds: receiver.diamondBalance });
     }
-    io.to(room.code).emit("giftEvent", { from: sender.name, to: receiver.name, amount: amt });
+    const giftInfo = GIFT_CATALOG[amt] || {};
+    io.to(room.code).emit("giftEvent", { from: sender.name, to: receiver.name, amount: amt, giftName: giftInfo.name || null, giftSymbol: giftInfo.symbol || "🎁" });
 
-    // Si la sala está en una batalla LIVE, este regalo suma puntos para este lado —
-    // los puntos NO son iguales a las monedas: cada regalo del catálogo vale su propio
-    // puntaje (los caros valen desproporcionadamente más, para que se note en el marcador).
+    // Si la sala está en una batalla LIVE (grupal, hasta 10), este regalo suma puntos
+    // para esta sala — los puntos NO son iguales a las monedas: cada regalo del catálogo
+    // vale su propio puntaje (los caros valen desproporcionadamente más).
     if (room.activeBattleId) {
       const b = battles[room.activeBattleId];
-      if (b && !b.ended) {
-        const battlePoints = battlePointsForGift(amt);
-        const gifters = b.roomA === room.code ? b.giftersA : b.giftersB;
-        gifters[sender.email] = (gifters[sender.email] || 0) + battlePoints;
-        if (b.roomA === room.code) b.scoreA += battlePoints;
-        else if (b.roomB === room.code) b.scoreB += battlePoints;
-        broadcastState(room);
-        const otherCode = b.roomA === room.code ? b.roomB : b.roomA;
-        if (rooms[otherCode]) broadcastState(rooms[otherCode]);
+      if (b && !b.ended && b.roomCodes.includes(room.code)) {
+        let battlePoints = battlePointsForGift(amt);
+        // Los multiplicadores se van sumando, no se pisan entre sí — si cae doble
+        // puntos justo en el PK Final, el regalo vale con las dos cosas juntas.
+        if (b.doublePointsActive) battlePoints *= 2;
+        if (b.pkFinalActive) battlePoints = Math.round(battlePoints * 1.5);
+        if (!b.gifters[room.code]) b.gifters[room.code] = {};
+        b.gifters[room.code][sender.email] = (b.gifters[room.code][sender.email] || 0) + battlePoints;
+        b.scores[room.code] = (b.scores[room.code] || 0) + battlePoints;
+        // Todas las salas que están juntas en esta batalla ven el marcador actualizado
+        b.roomCodes.forEach((code) => { if (rooms[code]) broadcastState(rooms[code]); });
       }
     }
   });

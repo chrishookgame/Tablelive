@@ -192,12 +192,32 @@ const lobbyError = document.getElementById("lobby-error");
 let selectedCap = 4;
 let selectedHandSize = 9;
 let mySeatIndex = null;
+
+// Igual que en TikTok: si YO ya estoy transmitiendo mi propio en vivo (soy el
+// anfitrión, asiento 0) y toco para ir a ver el en vivo de otra persona, no quiero
+// que el mío se corte. Como cada pestaña del navegador es una conexión aparte al
+// servidor, abrir el otro en vivo en una pestaña NUEVA deja el mío corriendo intacto
+// en la pestaña original — cuando cierro esa pestaña nueva, vuelvo directo a la mía,
+// que nunca se movió.
+function goWatchLive(code) {
+  const amIHostingMyOwn = mySeatIndex === 0 && latestState && !latestState.finished;
+  if (amIHostingMyOwn) {
+    window.open("/?watch=" + code, "_blank");
+    showToast("Se abrió en una pestaña nueva — tu transmisión sigue en vivo acá.");
+  } else {
+    location.href = "/?watch=" + code;
+  }
+}
 let myQueuePosition = null;
 let amIModerator = false;
 let mutedNamesSet = new Set();
 let liveAdminNames = [];
 function updateModeratorStatus() {
-  amIModerator = mySeatIndex !== null || liveAdminNames.includes(myName);
+  // Antes cualquier jugador sentado a la mesa (asiento 0, 1, 2 o 3) tenía poder de
+  // moderador — eso estaba mal. Ahora solo el anfitrión de verdad (quien creó la
+  // transmisión, siempre en el asiento 0) o alguien que él haya promovido explícitamente
+  // como admin del live pueden manejar cámaras, silenciar, destacar, etc.
+  amIModerator = mySeatIndex === 0 || liveAdminNames.includes(myName);
 }
 let myHand = [];
 let latestState = null;
@@ -476,6 +496,13 @@ async function loadGiftCatalog() {
   } catch (e) { giftCatalogCache = null; }
 }
 
+document.getElementById("open-terms-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("terms-modal").classList.remove("hidden");
+});
+document.getElementById("close-terms-modal").addEventListener("click", () => {
+  document.getElementById("terms-modal").classList.add("hidden");
+});
 document.getElementById("logout-link").addEventListener("click", (e) => {
   e.preventDefault();
   localStorage.removeItem("domino_token");
@@ -502,6 +529,7 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach((b) => {
 
 function openDominoModal() { document.getElementById("domino-modal").classList.remove("hidden"); }
 function closeDominoModal() { document.getElementById("domino-modal").classList.add("hidden"); }
+document.getElementById("domino-fab-btn").addEventListener("click", openDominoModal);
 document.getElementById("close-domino-modal").addEventListener("click", closeDominoModal);
 
 // =====================================================================
@@ -578,9 +606,14 @@ function updateVideoTileOverlays(state, hostSeat, people) {
     if (!person && !isHost) { overlay.innerHTML = ""; return; }
     const name = isHost ? (hostSeat.name || "Anfitrión") : person.name;
     const isFeatured = state.featuredEmail === email;
+    const currentSize = (state.tileSizes && state.tileSizes[email]) || "normal";
+    const sizeIcons = { normal: "⬜", small: "🔹", medium: "🔷", large: "⬛" };
     const hostBadge = isHost ? `<span class="tile-host-badge">Anfitrión</span>` : "";
     const featureBtn = amIModerator
       ? `<button class="tile-icon-btn ${isFeatured ? "active" : ""}" data-feature-email="${escapeHtml(email)}" title="Destacar en pantalla grande">📌</button>`
+      : "";
+    const sizeBtn = amIModerator
+      ? `<button class="tile-icon-btn" data-size-email="${escapeHtml(email)}" data-current-size="${currentSize}" title="Cambiar tamaño (chico/mediano/grande)">${sizeIcons[currentSize]}</button>`
       : "";
     const muteBtn = amIModerator && person && person.isGuest
       ? `<button class="tile-icon-btn" data-mute-email="${escapeHtml(email)}" title="Silenciar">🔇</button>`
@@ -590,12 +623,18 @@ function updateVideoTileOverlays(state, hostSeat, people) {
       : "";
     overlay.innerHTML = `
       ${hostBadge}
-      <div class="tile-controls-row">${featureBtn}${muteBtn}${removeBtn}</div>
+      <div class="tile-controls-row">${featureBtn}${sizeBtn}${muteBtn}${removeBtn}</div>
       <div class="tile-name-row"><span class="tile-name">${escapeHtml(name)}</span></div>
     `;
     overlay.querySelectorAll("[data-feature-email]").forEach((btn) => btn.addEventListener("click", (e) => {
       e.stopPropagation();
       socket.emit("setFeaturedParticipant", { email: isFeatured ? null : email });
+    }));
+    overlay.querySelectorAll("[data-size-email]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const order = ["normal", "small", "medium", "large"];
+      const next = order[(order.indexOf(btn.dataset.currentSize) + 1) % order.length];
+      socket.emit("setTileSize", { email, size: next === "normal" ? null : next });
     }));
     overlay.querySelectorAll("[data-mute-email]").forEach((btn) => btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -714,6 +753,9 @@ function renderOnCameraStrip(state, hostSeat) {
   // Marcamos con "featured" el video que corresponda (grande) — lo decide el anfitrión
   document.querySelectorAll("#video-bar .video-tile").forEach((tile) => {
     tile.classList.toggle("featured", !!state.featuredEmail && tile.dataset.email === state.featuredEmail);
+    ["small", "medium", "large"].forEach((sz) => tile.classList.remove("tile-size-" + sz));
+    const chosenSize = state.tileSizes && tile.dataset.email ? state.tileSizes[tile.dataset.email] : null;
+    if (chosenSize) tile.classList.add("tile-size-" + chosenSize);
   });
 }
 
@@ -746,8 +788,9 @@ async function openUserProfile(email) {
       fallbackEl.style.background = colorForName(profile.name || "?");
     }
     const badgeHtml = profile.badge ? profile.badge + " " : "";
-    document.getElementById("up-name").textContent = badgeHtml + profile.name;
-    document.getElementById("up-followers").textContent = profile.followerCount + " seguidores";
+    const trophyHtml = profile.hasTrophy10Wins ? " 🏆" : "";
+    document.getElementById("up-name").textContent = badgeHtml + profile.name + trophyHtml;
+    document.getElementById("up-followers").textContent = profile.followerCount + " seguidores" + (profile.dominoWins ? " · " + profile.dominoWins + " victorias" : "");
     document.getElementById("up-level-badge").textContent = "⭐ Nivel " + (profile.level || 1);
 
     const giftsGallery = document.getElementById("up-gifts-gallery");
@@ -1314,7 +1357,7 @@ function openPostViewer(post, list, index) {
       <button class="btn-watch" id="live-preview-enter-btn">▶ Entrar al vivo</button>
     `;
     document.getElementById("live-preview-enter-btn").addEventListener("click", () => {
-      location.href = "/?watch=" + post.code;
+      goWatchLive(post.code);
     });
     document.getElementById("post-viewer-author").textContent = "";
     document.getElementById("post-viewer-caption").textContent = "";
@@ -1623,10 +1666,11 @@ function renderPostComments() {
     const initial = (c.name || "?").trim().charAt(0).toUpperCase();
     return `<div class="post-comment-row">
       <span class="chat-line-avatar" style="background:${colorForName(c.name || "?")}">${initial}</span>
-      <span class="post-comment-text"><b>${escapeHtml(c.name)}</b> ${escapeHtml(c.text)}</span>
+      <span class="post-comment-text"><b>${escapeHtml(c.name)}</b> ${renderTextWithMentions(c.text, c.mentions)}</span>
     </div>`;
   }).join("");
   wrap.scrollTop = wrap.scrollHeight;
+  wrap.querySelectorAll("[data-open-profile]").forEach((el) => el.addEventListener("click", () => openUserProfile(el.dataset.openProfile)));
 }
 
 document.getElementById("post-comment-btn").addEventListener("click", () => {
@@ -1652,6 +1696,9 @@ document.getElementById("post-comments-close").addEventListener("click", () => {
 });
 document.getElementById("post-comment-send-btn").addEventListener("click", sendPostComment);
 document.getElementById("post-comment-input").addEventListener("keydown", (e) => { if (e.key === "Enter") sendPostComment(); });
+let pendingPostCommentMentions = [];
+setupMentionAutocomplete(document.getElementById("post-comment-input"), document.getElementById("post-comment-mention-suggestions"), () => pendingPostCommentMentions);
+
 async function sendPostComment() {
   const input = document.getElementById("post-comment-input");
   const text = input.value.trim();
@@ -1660,11 +1707,12 @@ async function sendPostComment() {
     const res = await fetch("/api/posts/" + currentViewedPost.id + "/comment", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + authToken },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, mentions: pendingPostCommentMentions }),
     });
     const data = await res.json();
     if (!res.ok) return;
     input.value = "";
+    pendingPostCommentMentions = [];
     currentViewedPost.comments.push(data.comment);
     document.getElementById("post-comment-count").textContent = data.commentCount;
     renderPostComments();
@@ -2036,7 +2084,7 @@ async function loadLiveRooms() {
       return;
     }
     wrap.innerHTML = data.rooms.map((r) => `
-      <div class="feed-card" onclick="location.href='/?watch=${r.code}'">
+      <div class="feed-card" onclick="goWatchLive('${r.code}')">
         <div class="feed-card-top"><span class="live-dot"></span> EN VIVO · ${r.spectatorCount} mirando</div>
         <div class="feed-card-players">${r.players.map(escapeHtml).join(" · ")}</div>
         <div class="feed-card-meta">Sala ${r.code} · ${r.players.length}/${r.capacity} jugadores</div>
@@ -2110,7 +2158,7 @@ function renderFollowingLiveRow(list) {
     </div>`;
   }).join("");
   row.querySelectorAll("[data-watch-live]").forEach((el) => {
-    el.addEventListener("click", () => { location.href = "/?watch=" + el.dataset.watchLive; });
+    el.addEventListener("click", () => { goWatchLive(el.dataset.watchLive); });
   });
 }
 
@@ -2155,7 +2203,7 @@ function attachPlayerRowHandlers(wrap, inputId, resultsId) {
     });
   });
   wrap.querySelectorAll("[data-watch]").forEach((btn) => {
-    btn.addEventListener("click", () => { location.href = "/?watch=" + btn.dataset.watch; });
+    btn.addEventListener("click", () => { goWatchLive(btn.dataset.watch); });
   });
   wrap.querySelectorAll("[data-sub-email]").forEach((btn) => {
     btn.addEventListener("click", () => openSubscribeModal(btn.dataset.subEmail, btn.dataset.subName));
@@ -2292,16 +2340,16 @@ function startSpectating(name) {
   wireModerationSocketEvents(socket);
   wireRtcSocketEvents(socket);
   wireMeetingSocketEvents(socket);
-  socket.on("errorMsg", (msg) => { document.getElementById("spectate-info").textContent = msg; });
+  socket.on("errorMsg", (msg) => { document.getElementById("spectate-info").textContent = msg; showToast(msg); });
   socket.on("balance", (bal) => {
     myCoinBalance = bal.coins;
     myDiamondBalance = bal.diamonds;
     updateWalletDisplay();
   });
   socket.on("giftError", (msg) => showToast(msg));
-  socket.on("giftEvent", (g) => showToast(g.from + " le regaló " + g.amount + " 💎 a " + g.to + "!"));
+  socket.on("giftEvent", (g) => { spawnGiftBanner(g); playGiftSound(g.giftName); });
   socket.on("likeEvent", (l) => { if (l.from !== myName) showToast(l.from + " le dio ❤️ a alguien"); });
-  socket.on("reactionEvent", (r) => spawnFloatingEmoji(r.emoji));
+  socket.on("reactionEvent", (r) => { spawnFloatingEmoji(r.emoji); playReactionSound(r.emoji); });
   socket.on("privateMessageEvent", (p) => { renderPrivateMessage(p); if (p.to === myName && p.from !== myName && privateChatWith !== p.from) showToast(p.from + " te mandó un mensaje privado"); });
   socket.on("cameraRequestEvent", (data) => renderCameraPanel(data));
   socket.on("commentEvent", (c) => appendChatLine(c));
@@ -2390,7 +2438,7 @@ function showFollowedLiveBanner(data) {
   `;
   banner.addEventListener("click", (e) => {
     if (e.target.id === "followed-live-close") { banner.remove(); return; }
-    location.href = "/?watch=" + data.code;
+    goWatchLive(data.code);
   });
   document.body.appendChild(banner);
   setTimeout(() => { if (banner.parentNode) banner.remove(); }, 12000);
@@ -2403,6 +2451,11 @@ function attachSocketHandlers() {
   wireMeetingSocketEvents(socket);
   socket.on("followedUserWentLive", (data) => {
     showFollowedLiveBanner(data);
+  });
+  socket.on("trophyEarned", (data) => {
+    // Aparece solo, sin que nadie tenga que hacer nada — como pediste.
+    playReactionSound("🏆");
+    showToast("🏆 ¡Ganaste el trofeo de 10 victorias en dominó! Ya te aparece en tu perfil.");
   });
   socket.on("connect_error", () => {
     // Esto NO significa que la sesión venció — el servidor nunca rechaza la conexión
@@ -2451,7 +2504,7 @@ function attachSocketHandlers() {
     document.getElementById("queue-confirm-no").onclick = () => { modal.classList.add("hidden"); };
   }
 
-  socket.on("errorMsg", (msg) => { lobbyError.textContent = msg; });
+  socket.on("errorMsg", (msg) => { lobbyError.textContent = msg; showToast(msg); });
 
   socket.on("joined", (data) => {
     mySeatIndex = data.seatIndex;
@@ -2486,11 +2539,11 @@ function attachSocketHandlers() {
   });
 
   socket.on("giftError", (msg) => showToast(msg));
-  socket.on("giftEvent", (g) => showToast(g.from + " le regaló " + g.amount + " 💎 a " + g.to + "!"));
+  socket.on("giftEvent", (g) => { spawnGiftBanner(g); playGiftSound(g.giftName); });
   socket.on("likeEvent", (l) => {
     if (l.from !== myName) showToast(l.from + " le dio ❤️ a alguien");
   });
-  socket.on("reactionEvent", (r) => spawnFloatingEmoji(r.emoji));
+  socket.on("reactionEvent", (r) => { spawnFloatingEmoji(r.emoji); playReactionSound(r.emoji); });
   socket.on("privateMessageEvent", (p) => { renderPrivateMessage(p); if (p.to === myName && p.from !== myName && privateChatWith !== p.from) showToast(p.from + " te mandó un mensaje privado"); });
   socket.on("cameraRequestEvent", (data) => renderCameraPanel(data));
   socket.on("commentEvent", (c) => appendChatLine(c));
@@ -2572,7 +2625,7 @@ let localStream = null;
 let peerConnections = {}; // socketId -> RTCPeerConnection (mi propia sala)
 let opponentPeerConnections = {}; // socketId -> RTCPeerConnection (sala del rival, durante una batalla)
 let rtcRoomCode = null;
-let rtcOpponentRoomCode = null;
+let rtcOpponentRoomCodes = new Set();
 let myMicOn = false;
 let myCamOn = false;
 
@@ -2729,7 +2782,7 @@ function wireRtcSocketEvents(sock) {
   sock.on("rtc-existing-peers", ({ roomCode, peers }) => {
     peers.forEach((p) => { if (p.email) peerEmailBySocketId[p.socketId] = p.email; });
     if (roomCode === rtcRoomCode) peers.forEach((p) => callPeer(p.socketId, "own", true));
-    else if (roomCode === rtcOpponentRoomCode) peers.forEach((p) => callPeer(p.socketId, "opponent", false));
+    else if (rtcOpponentRoomCodes.has(roomCode)) peers.forEach((p) => callPeer(p.socketId, "opponent", false));
     else if (roomCode === meetingCode) peers.forEach((p) => callPeer(p.socketId, "meeting", true));
   });
   sock.on("rtc-peer-joined", ({ socketId, email }) => { if (email) peerEmailBySocketId[socketId] = email; });
@@ -2785,16 +2838,19 @@ document.getElementById("connect-video-btn").addEventListener("click", () => {
 });
 
 // ---------------- Batalla LIVE: video del rival, en la otra mitad de la pantalla ----------------
-function mountOpponentVideo(code) {
+function mountAllBattleVideos(codes) {
   const bar = document.getElementById("video-bar");
-  if (bar.dataset.opponentCode === code) return; // ya está montado
-  bar.classList.add("battle-split");
-  bar.dataset.opponentCode = code;
-  rtcOpponentRoomCode = code;
-  socket.emit("rtc-join", { roomCode: code });
+  // Con más de 2 en la batalla, dejamos que la grilla normal se acomode sola (no forzamos
+  // el 50/50 que usábamos antes solo para 1 contra 1).
+  bar.classList.toggle("battle-split", codes.length === 1);
+  codes.forEach((code) => {
+    if (rtcOpponentRoomCodes.has(code)) return; // ya está conectado
+    rtcOpponentRoomCodes.add(code);
+    socket.emit("rtc-join", { roomCode: code });
+  });
 }
 
-function unmountOpponentVideo() {
+function unmountAllBattleVideos() {
   const bar = document.getElementById("video-bar");
   Object.keys(opponentPeerConnections).forEach((sid) => {
     try { opponentPeerConnections[sid].close(); } catch (e) {}
@@ -2802,9 +2858,9 @@ function unmountOpponentVideo() {
     if (t) t.remove();
   });
   opponentPeerConnections = {};
-  if (rtcOpponentRoomCode) { socket.emit("rtc-leave", { roomCode: rtcOpponentRoomCode }); rtcOpponentRoomCode = null; }
+  rtcOpponentRoomCodes.forEach((code) => socket.emit("rtc-leave", { roomCode: code }));
+  rtcOpponentRoomCodes.clear();
   bar.classList.remove("battle-split");
-  delete bar.dataset.opponentCode;
 }
 
 // ---------------- Mi cámara / mi micrófono: un solo botón cada uno, apagados por defecto ----------------
@@ -2865,6 +2921,35 @@ function updateMeetingMicCamButtons() {
   document.getElementById("meeting-cam-btn").textContent = meetingCamOn ? "📷 Cámara activada" : "🎥 Prender mi cámara";
 }
 
+// Entrada moderna a la reunión — una secuencia corta tipo "conexión segura" con
+// anillos que pulsan, para que se sienta una app con tecnología de verdad detrás,
+// no solo una pantalla que aparece de golpe.
+function playMeetingEntryAnimation() {
+  const fx = document.getElementById("meeting-entry-fx");
+  const status = document.getElementById("meeting-entry-status");
+  if (!fx || !status) return;
+  fx.classList.remove("hidden", "fade-out");
+  const steps = [
+    "Iniciando conexión segura...",
+    "Verificando identidad...",
+    "Activando cámara y micrófono...",
+    "Sincronizando con el servidor...",
+    "¡Listo! Entrando a la sala.",
+  ];
+  let i = 0;
+  status.textContent = steps[0];
+  const interval = setInterval(() => {
+    i++;
+    if (i >= steps.length) {
+      clearInterval(interval);
+      fx.classList.add("fade-out");
+      setTimeout(() => { fx.classList.add("hidden"); fx.classList.remove("fade-out"); }, 500);
+      return;
+    }
+    status.textContent = steps[i];
+  }, 480);
+}
+
 async function enterMeetingScreen(summary) {
   meetingCode = summary.code;
   meetingStartedAt = summary.startedAt;
@@ -2877,6 +2962,7 @@ async function enterMeetingScreen(summary) {
   document.getElementById("meeting-code-label").textContent = "🤝 " + summary.code;
   document.getElementById("meeting-video-grid").innerHTML = "";
   document.getElementById("meeting-limit-msg").classList.add("hidden");
+  playMeetingEntryAnimation();
 
   try {
     meetingLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -2923,6 +3009,8 @@ function startMeetingTimer() {
 
 function leaveMeetingScreen(message) {
   clearInterval(meetingTimerInterval);
+  document.getElementById("meeting-whiteboard").classList.add("hidden");
+  whiteboardCtx = null;
   if (vbgActive && vbgContext === "meeting") { vbgActive = false; if (vbgAnimationFrame) cancelAnimationFrame(vbgAnimationFrame); if (vbgProcessedStream) { vbgProcessedStream.getTracks().forEach((t) => t.stop()); vbgProcessedStream = null; } }
   if (mediaRecorderTL && mediaRecorderTL.state !== "inactive" && recordingSourceType === "meeting") stopRecordingTL();
   if (meetingLocalStream) { meetingLocalStream.getTracks().forEach((t) => t.stop()); meetingLocalStream = null; }
@@ -2982,6 +3070,16 @@ function wireMeetingSocketEvents(sock) {
   sock.on("meetingRoster", () => {}); // por ahora no mostramos lista de nombres aparte, ya se ve el video de cada uno
   sock.on("meetingEnded", (data) => leaveMeetingScreen("📴 " + (data.reason || "La reunión terminó.")));
   sock.on("youWereKickedFromMeeting", () => leaveMeetingScreen("🚪 El anfitrión te expulsó de la reunión."));
+  sock.on("meetingWhiteboardDraw", (stroke) => {
+    if (!whiteboardCtx) return; // si no tengo la pizarra abierta, no hace falta dibujar
+    const canvas = document.getElementById("meeting-whiteboard-canvas");
+    drawWhiteboardStroke(whiteboardCtx, canvas.width, canvas.height, stroke.from, stroke.to, stroke.color);
+  });
+  sock.on("meetingWhiteboardClear", () => {
+    if (!whiteboardCtx) return;
+    const canvas = document.getElementById("meeting-whiteboard-canvas");
+    whiteboardCtx.clearRect(0, 0, canvas.width, canvas.height);
+  });
   sock.on("hostMutedYouInMeetingEvent", () => {
     showToast("El anfitrión te silenció el micrófono.");
     if (meetingLocalStream) {
@@ -2994,7 +3092,10 @@ function wireMeetingSocketEvents(sock) {
     const joinModal = document.getElementById("join-meeting-modal");
     if (joinModal && !joinModal.classList.contains("hidden")) {
       document.getElementById("join-meeting-msg").textContent = msg;
+    } else {
+      showToast(msg);
     }
+    console.log("[errorMsg del servidor]:", msg);
   });
 }
 
@@ -3983,6 +4084,99 @@ document.getElementById("meeting-filters-btn").addEventListener("click", () => {
   document.getElementById("meeting-filters-panel").classList.toggle("hidden");
 });
 
+// ---------------- Pizarra opcional de la reunión (para cursos, clases, explicaciones) ----------------
+let whiteboardCtx = null;
+let whiteboardDrawing = false;
+let whiteboardColor = "#ffffff";
+let whiteboardLastPoint = null;
+
+function resizeWhiteboardCanvas() {
+  const canvas = document.getElementById("meeting-whiteboard-canvas");
+  if (!canvas) return;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+}
+
+function openWhiteboard() {
+  document.getElementById("meeting-whiteboard").classList.remove("hidden");
+  const canvas = document.getElementById("meeting-whiteboard-canvas");
+  resizeWhiteboardCanvas();
+  whiteboardCtx = canvas.getContext("2d");
+  whiteboardCtx.lineCap = "round";
+  whiteboardCtx.lineJoin = "round";
+}
+function closeWhiteboard() {
+  document.getElementById("meeting-whiteboard").classList.add("hidden");
+}
+
+document.getElementById("meeting-whiteboard-btn").addEventListener("click", () => {
+  const el = document.getElementById("meeting-whiteboard");
+  if (el.classList.contains("hidden")) openWhiteboard(); else closeWhiteboard();
+});
+document.getElementById("whiteboard-close").addEventListener("click", closeWhiteboard);
+
+document.querySelectorAll(".whiteboard-chalk").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".whiteboard-chalk").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    whiteboardColor = btn.dataset.chalkColor;
+    document.getElementById("whiteboard-eraser").classList.remove("active");
+  });
+});
+document.getElementById("whiteboard-eraser").addEventListener("click", () => {
+  document.querySelectorAll(".whiteboard-chalk").forEach((b) => b.classList.remove("active"));
+  document.getElementById("whiteboard-eraser").classList.add("active");
+  whiteboardColor = "eraser";
+});
+document.getElementById("whiteboard-clear").addEventListener("click", () => {
+  if (!whiteboardCtx) return;
+  const canvas = document.getElementById("meeting-whiteboard-canvas");
+  whiteboardCtx.clearRect(0, 0, canvas.width, canvas.height);
+  socket.emit("meetingWhiteboardClear");
+});
+
+function whiteboardPointFromEvent(e, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const point = e.touches ? e.touches[0] : e;
+  return { x: (point.clientX - rect.left) / rect.width, y: (point.clientY - rect.top) / rect.height };
+}
+
+function drawWhiteboardStroke(ctx, canvasW, canvasH, from, to, color) {
+  ctx.globalCompositeOperation = color === "eraser" ? "destination-out" : "source-over";
+  ctx.strokeStyle = color === "eraser" ? "rgba(0,0,0,1)" : color;
+  ctx.lineWidth = color === "eraser" ? 24 : 4;
+  ctx.beginPath();
+  ctx.moveTo(from.x * canvasW, from.y * canvasH);
+  ctx.lineTo(to.x * canvasW, to.y * canvasH);
+  ctx.stroke();
+}
+
+(function setupWhiteboardDrawing() {
+  const canvas = document.getElementById("meeting-whiteboard-canvas");
+  const start = (e) => {
+    whiteboardDrawing = true;
+    whiteboardLastPoint = whiteboardPointFromEvent(e, canvas);
+  };
+  const move = (e) => {
+    if (!whiteboardDrawing || !whiteboardCtx) return;
+    e.preventDefault();
+    const point = whiteboardPointFromEvent(e, canvas);
+    drawWhiteboardStroke(whiteboardCtx, canvas.width, canvas.height, whiteboardLastPoint, point, whiteboardColor);
+    socket.emit("meetingWhiteboardDraw", { from: whiteboardLastPoint, to: point, color: whiteboardColor });
+    whiteboardLastPoint = point;
+  };
+  const end = () => { whiteboardDrawing = false; whiteboardLastPoint = null; };
+  canvas.addEventListener("mousedown", start);
+  canvas.addEventListener("mousemove", move);
+  canvas.addEventListener("mouseup", end);
+  canvas.addEventListener("mouseleave", end);
+  canvas.addEventListener("touchstart", start, { passive: true });
+  canvas.addEventListener("touchmove", move, { passive: false });
+  canvas.addEventListener("touchend", end);
+  window.addEventListener("resize", () => { if (!document.getElementById("meeting-whiteboard").classList.contains("hidden")) resizeWhiteboardCanvas(); });
+})();
+
 document.getElementById("rematch-btn").addEventListener("click", () => socket.emit("rematch"));
 
 function spawnFloatingEmoji(emoji) {
@@ -3996,7 +4190,183 @@ function spawnFloatingEmoji(emoji) {
   setTimeout(() => el.remove(), 2600);
 }
 
-const RAIL_EMOJIS = ["😂", "😢", "😮", "👏", "😱", "🔥", "😍", "🤣", "😡", "🎉", "🙌", "💯"];
+// ---------------- Sonidos de reacción (reír, aplaudir, gritar, llorar) ----------------
+// Los generamos nosotros mismos con el sintetizador del navegador (Web Audio API), en
+// vez de usar grabaciones de audio de otros lados — así no hay ningún tema de derechos
+// de autor, y se escuchan para todos los que están mirando el en vivo, no solo quien
+// tocó el botón.
+let reactionAudioCtx = null;
+function getReactionAudioCtx() {
+  if (!reactionAudioCtx) {
+    try { reactionAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+  }
+  if (reactionAudioCtx.state === "suspended") reactionAudioCtx.resume();
+  return reactionAudioCtx;
+}
+function playTone(ctx, freqStart, freqEnd, duration, startAt, type, gainPeak) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freqStart, startAt);
+  osc.frequency.linearRampToValueAtTime(freqEnd, startAt + duration);
+  gain.gain.setValueAtTime(0, startAt);
+  gain.gain.linearRampToValueAtTime(gainPeak || 0.25, startAt + duration * 0.15);
+  gain.gain.linearRampToValueAtTime(0, startAt + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(startAt);
+  osc.stop(startAt + duration);
+}
+function playNoiseBurst(ctx, duration, startAt, gainPeak) {
+  const bufferSize = ctx.sampleRate * duration;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1800;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, startAt);
+  gain.gain.linearRampToValueAtTime(gainPeak || 0.3, startAt + duration * 0.2);
+  gain.gain.linearRampToValueAtTime(0, startAt + duration);
+  noise.connect(filter).connect(gain).connect(ctx.destination);
+  noise.start(startAt);
+  noise.stop(startAt + duration);
+}
+const REACTION_SOUNDS = {
+  "😂": (ctx) => { // risa: varios pulsitos cortos de tono que suben y bajan, como "ja-ja-ja"
+    const now = ctx.currentTime;
+    for (let i = 0; i < 4; i++) playTone(ctx, 440, 520, 0.14, now + i * 0.16, "triangle", 0.22);
+  },
+  "🤣": (ctx) => {
+    const now = ctx.currentTime;
+    for (let i = 0; i < 5; i++) playTone(ctx, 420, 560, 0.13, now + i * 0.14, "triangle", 0.24);
+  },
+  "👏": (ctx) => { // aplausos: varios golpes de ruido cortitos y rápidos
+    const now = ctx.currentTime;
+    for (let i = 0; i < 8; i++) playNoiseBurst(ctx, 0.09, now + i * 0.1, 0.3);
+  },
+  "🙌": (ctx) => {
+    const now = ctx.currentTime;
+    for (let i = 0; i < 6; i++) playNoiseBurst(ctx, 0.1, now + i * 0.11, 0.28);
+  },
+  "😱": (ctx) => { // grito: un tono agudo que sube rápido
+    playTone(ctx, 500, 1100, 0.45, ctx.currentTime, "sawtooth", 0.22);
+  },
+  "😢": (ctx) => { // llanto: tono que baja lento y tembloroso
+    const now = ctx.currentTime;
+    playTone(ctx, 480, 260, 0.9, now, "sine", 0.18);
+    playTone(ctx, 380, 200, 0.6, now + 0.5, "sine", 0.14);
+  },
+  "🎉": (ctx) => { // festejo: mezcla de aplausos con un tono festivo arriba
+    const now = ctx.currentTime;
+    for (let i = 0; i < 6; i++) playNoiseBurst(ctx, 0.08, now + i * 0.09, 0.22);
+    playTone(ctx, 600, 900, 0.3, now, "triangle", 0.15);
+  },
+  "😮": (ctx) => playTone(ctx, 300, 900, 0.3, ctx.currentTime, "sine", 0.2), // sorpresa: un "oooh" que sube rápido
+  "🔥": (ctx) => { // fuego: chisporroteo, varios pulsos cortos de ruido
+    const now = ctx.currentTime;
+    for (let i = 0; i < 5; i++) playNoiseBurst(ctx, 0.05, now + i * 0.08 + Math.random() * 0.03, 0.18);
+  },
+  "😍": (ctx) => playChime(ctx, [784, 988, 1245, 1568], 0.16, ctx.currentTime, 0.18), // enamorado: campanitas brillantes
+  "😡": (ctx) => { const now = ctx.currentTime; playTone(ctx, 140, 90, 0.35, now, "sawtooth", 0.25); }, // enojo: tono grave y áspero
+  "💯": (ctx) => playChime(ctx, [523, 659, 784, 1046, 1318], 0.13, ctx.currentTime, 0.2), // fanfarria cortita de "100 puntos"
+  // ---- Sonidos propios de la marca TableLive ----
+  "🎲": (ctx) => { // el dado de TableLive: como si repiqueteara al caer sobre la mesa
+    const now = ctx.currentTime;
+    for (let i = 0; i < 4; i++) playNoiseBurst(ctx, 0.04, now + i * 0.06, 0.16 - i * 0.02);
+  },
+  "🏆": (ctx) => { // fanfarria de victoria de TableLive, para festejar una buena jugada
+    const now = ctx.currentTime;
+    playChime(ctx, [523, 659, 784, 1046, 1318, 1568], 0.14, now, 0.22);
+    playNoiseBurst(ctx, 0.12, now, 0.15);
+  },
+  "🤔": (ctx) => { const now = ctx.currentTime; playTone(ctx, 440, 350, 0.12, now, "sine", 0.15); playTone(ctx, 350, 440, 0.14, now + 0.14, "sine", 0.15); }, // "hmm" dudoso, sube y baja
+  "😴": (ctx) => { const now = ctx.currentTime; playTone(ctx, 200, 130, 0.5, now, "sine", 0.12); playTone(ctx, 180, 110, 0.4, now + 0.45, "sine", 0.1); }, // ronquido cómico, dos "znk-znk"
+  "🥳": (ctx) => { // fiesta: parecido al festejo pero más agudo y saltarín
+    const now = ctx.currentTime;
+    for (let i = 0; i < 5; i++) playTone(ctx, 700 + i * 60, 900 + i * 60, 0.09, now + i * 0.08, "triangle", 0.16);
+    for (let i = 0; i < 4; i++) playNoiseBurst(ctx, 0.06, now + i * 0.1, 0.15);
+  },
+};
+function playReactionSound(emoji) {
+  const recipe = REACTION_SOUNDS[emoji];
+  if (!recipe) return;
+  const ctx = getReactionAudioCtx();
+  if (!ctx) return;
+  try { recipe(ctx); } catch (e) {}
+}
+
+// ---------------- Sonido de cada regalo, según su "especie" (como en la imagen de TikTok) ----------------
+// Igual que las reacciones: todo sintetizado acá mismo, nada de grabaciones de otros
+// lados. Cada regalo del catálogo (Pollito, Perro, León, etc.) tiene su propia firma
+// de sonido, para que se note la diferencia entre mandar uno chico y uno grande.
+function playChime(ctx, freqs, noteDur, startAt, gainPeak) {
+  freqs.forEach((f, i) => playTone(ctx, f, f, noteDur, startAt + i * noteDur * 0.85, "sine", gainPeak || 0.18));
+}
+function playRumble(ctx, duration, startAt, gainPeak) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(90, startAt);
+  osc.frequency.linearRampToValueAtTime(60, startAt + duration);
+  gain.gain.setValueAtTime(0, startAt);
+  gain.gain.linearRampToValueAtTime(gainPeak || 0.3, startAt + duration * 0.3);
+  gain.gain.linearRampToValueAtTime(0, startAt + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(startAt);
+  osc.stop(startAt + duration);
+}
+const GIFT_SOUNDS = {
+  "Pollito": (ctx) => { const now = ctx.currentTime; for (let i = 0; i < 2; i++) playTone(ctx, 1400, 1700, 0.09, now + i * 0.13, "sine", 0.18); },
+  "Ratón": (ctx) => { const now = ctx.currentTime; for (let i = 0; i < 3; i++) playTone(ctx, 1800, 2100, 0.06, now + i * 0.09, "sine", 0.14); },
+  "Conejo": (ctx) => playTone(ctx, 500, 900, 0.15, ctx.currentTime, "sine", 0.2),
+  "Hámster": (ctx) => { const now = ctx.currentTime; for (let i = 0; i < 3; i++) playTone(ctx, 1600, 1900, 0.06, now + i * 0.08, "sine", 0.14); },
+  "Gato": (ctx) => playTone(ctx, 500, 750, 0.35, ctx.currentTime, "sine", 0.2),
+  "Tortuga": (ctx) => playTone(ctx, 200, 160, 0.3, ctx.currentTime, "sine", 0.15),
+  "Perro": (ctx) => { const now = ctx.currentTime; playTone(ctx, 300, 200, 0.12, now, "sawtooth", 0.3); playTone(ctx, 300, 200, 0.12, now + 0.18, "sawtooth", 0.3); },
+  "Zorro": (ctx) => { const now = ctx.currentTime; playTone(ctx, 900, 1300, 0.1, now, "triangle", 0.22); playTone(ctx, 900, 1300, 0.1, now + 0.14, "triangle", 0.22); },
+  "Koala": (ctx) => playRumble(ctx, 0.5, ctx.currentTime, 0.2),
+  "Lobo": (ctx) => playTone(ctx, 350, 700, 0.9, ctx.currentTime, "sine", 0.22),
+  "León": (ctx) => { playRumble(ctx, 0.7, ctx.currentTime, 0.32); playNoiseBurst(ctx, 0.5, ctx.currentTime, 0.15); },
+  "Caballo": (ctx) => { const now = ctx.currentTime; playTone(ctx, 500, 750, 0.15, now, "sawtooth", 0.22); playTone(ctx, 750, 550, 0.25, now + 0.15, "sawtooth", 0.2); },
+  "Vaca": (ctx) => playTone(ctx, 220, 260, 0.6, ctx.currentTime, "sine", 0.22),
+  "Elefante": (ctx) => playTone(ctx, 600, 1400, 0.6, ctx.currentTime, "sawtooth", 0.25),
+  "Tiburón": (ctx) => playNoiseBurst(ctx, 0.7, ctx.currentTime, 0.2),
+  "Chancho": (ctx) => { const now = ctx.currentTime; playTone(ctx, 250, 400, 0.1, now, "sawtooth", 0.22); playTone(ctx, 250, 380, 0.1, now + 0.13, "sawtooth", 0.22); },
+  "Ballena": (ctx) => playTone(ctx, 200, 500, 1.1, ctx.currentTime, "sine", 0.2),
+  "Águila": (ctx) => { const now = ctx.currentTime; playTone(ctx, 1400, 2200, 0.18, now, "triangle", 0.2); playTone(ctx, 1300, 2000, 0.22, now + 0.2, "triangle", 0.18); },
+  "Dragón": (ctx) => { playRumble(ctx, 0.5, ctx.currentTime, 0.3); playNoiseBurst(ctx, 0.6, ctx.currentTime, 0.18); playTone(ctx, 200, 700, 0.5, ctx.currentTime, "sawtooth", 0.2); },
+  "Unicornio": (ctx) => playChime(ctx, [1046, 1318, 1568, 1975, 2349], 0.15, ctx.currentTime, 0.2),
+  "Corona": (ctx) => playChime(ctx, [523, 659, 784, 1046], 0.25, ctx.currentTime, 0.2),
+  "Luna": (ctx) => playChime(ctx, [880, 1108, 1318], 0.28, ctx.currentTime, 0.16),
+  "Sol": (ctx) => playChime(ctx, [988, 1245, 1480, 1760], 0.22, ctx.currentTime, 0.18),
+  "Saturno": (ctx) => playChime(ctx, [740, 932, 1108, 1480], 0.24, ctx.currentTime, 0.17),
+  "Tierra": (ctx) => playChime(ctx, [660, 831, 988], 0.3, ctx.currentTime, 0.18),
+  "Estrella": (ctx) => playChime(ctx, [1046, 1318, 1568, 2093], 0.18, ctx.currentTime, 0.2),
+  "Galaxia": (ctx) => playChime(ctx, [523, 659, 784, 1046, 1318], 0.2, ctx.currentTime, 0.2),
+  "Diamante": (ctx) => playChime(ctx, [1046, 1318, 1568, 2093, 2637], 0.16, ctx.currentTime, 0.22),
+};
+function playGiftSound(giftName) {
+  const recipe = giftName && GIFT_SOUNDS[giftName];
+  const ctx = getReactionAudioCtx();
+  if (!ctx) return;
+  try { (recipe || GIFT_SOUNDS["Diamante"])(ctx); } catch (e) {}
+}
+
+// El regalo grande, cruzando la pantalla, como hace TikTok — con su ícono y nombre.
+function spawnGiftBanner(data) {
+  const layer = document.getElementById("reaction-layer");
+  const el = document.createElement("div");
+  el.className = "gift-banner-fx";
+  el.innerHTML = `<span class="gift-banner-icon">${escapeHtml(data.giftSymbol || "🎁")}</span>
+    <span class="gift-banner-text"><b>${escapeHtml(data.from)}</b> le mandó ${escapeHtml(data.giftName || "un regalo")} a ${escapeHtml(data.to)}</span>`;
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+const RAIL_EMOJIS = ["😂", "😢", "😮", "👏", "😱", "🔥", "😍", "🤣", "😡", "🎉", "🙌", "💯", "🎲", "🏆", "🤔", "😴", "🥳"];
 function openEmojiPicker(anchorEl) {
   closeEmojiPicker();
   const picker = document.createElement("div");
@@ -4010,6 +4380,7 @@ function openEmojiPicker(anchorEl) {
     b.addEventListener("click", () => {
       socket.emit("sendReaction", { emoji });
       spawnFloatingEmoji(emoji);
+      playReactionSound(emoji);
       closeEmojiPicker();
     });
     picker.appendChild(b);
@@ -4033,6 +4404,16 @@ document.getElementById("toggle-guests-open-btn").addEventListener("click", () =
   const limit = document.getElementById("guests-limit-select").value;
   socket.emit("toggleGuestsOpen", { open: !isOpen, limit });
   showToast(!isOpen ? "✅ Ventanillas abiertas — hasta " + limit + " personas van a poder pedir subir a cámara." : "🔒 Ventanillas cerradas.");
+});
+// Si el anfitrión cambia el número MIENTRAS las ventanillas ya están abiertas, se
+// actualiza en el momento sin cerrarlas — antes solo se mandaba el número nuevo al
+// tocar el botón, y como ya estaban abiertas, tocarlo las cerraba en vez de actualizar.
+document.getElementById("guests-limit-select").addEventListener("change", () => {
+  const isOpen = document.getElementById("toggle-guests-open-btn").classList.contains("guests-open-active");
+  if (!isOpen) return; // si están cerradas, el número elegido se usa recién cuando las abra
+  const limit = document.getElementById("guests-limit-select").value;
+  socket.emit("toggleGuestsOpen", { open: true, limit });
+  showToast("✅ Actualizado — ahora hasta " + limit + " personas pueden pedir subir a cámara.");
 });
 document.getElementById("toggle-comments-closed-btn").addEventListener("click", () => {
   const isClosed = document.getElementById("toggle-comments-closed-btn").classList.contains("comments-closed-active");
@@ -4169,7 +4550,13 @@ document.getElementById("toggle-battle-panel-btn").addEventListener("click", () 
     closeOverlayDropdown("search-from-game-btn", "live-search-panel");
     closeOverlayDropdown("toggle-camera-panel-btn", "camera-panel");
     closeOverlayDropdown("toggle-settings-panel-btn", "settings-panel");
-    loadBattleTargets();
+    // Si soy el anfitrión de ESTA sala, veo las herramientas para invitar a otros.
+    // Si no (estoy solo mirando o soy invitado), veo el botón para PEDIR batalla
+    // — siempre que yo también tenga mi propia transmisión corriendo en otra pestaña,
+    // cosa que confirma el servidor cuando aprieto el botón.
+    document.getElementById("battle-host-tools").classList.toggle("hidden", !amIModerator);
+    document.getElementById("battle-request-box").classList.toggle("hidden", amIModerator);
+    if (amIModerator) loadBattleTargets();
   }
 });
 document.getElementById("toggle-camera-panel-btn").addEventListener("click", () => {
@@ -4190,6 +4577,10 @@ document.getElementById("toggle-settings-panel-btn").addEventListener("click", (
 // ---------------- Batalla LIVE: invitar, aceptar/rechazar, puntaje ----------------
 let selectedBattleDuration = 60;
 let selectedBattleRematchMinutes = 0;
+document.getElementById("request-battle-btn").addEventListener("click", () => {
+  console.log("[BATALLA cliente] Tocaste 'Pedir batalla'. Duración elegida:", selectedBattleDuration, "- relanzar:", selectedBattleRematchMinutes);
+  socket.emit("requestBattleFromViewer", { durationSeconds: selectedBattleDuration, autoRematchMinutes: selectedBattleRematchMinutes || null });
+});
 document.querySelectorAll("#battle-duration-row .cam-filter-swatch").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("#battle-duration-row .cam-filter-swatch").forEach((b) => b.classList.remove("active"));
@@ -4207,28 +4598,38 @@ document.querySelectorAll("#battle-rematch-row .cam-filter-swatch").forEach((btn
 
 async function loadBattleTargets() {
   const wrap = document.getElementById("battle-target-list");
+  document.getElementById("battle-roster-box").classList.add("hidden");
   wrap.innerHTML = '<p class="empty-msg-small">Buscando transmisiones...</p>';
   try {
     const res = await fetch("/api/live-rooms");
     const data = await res.json();
     const others = data.rooms.filter((r) => r.code !== (latestState && latestState.code));
-    if (!others.length) { wrap.innerHTML = '<p class="empty-msg-small">No hay otras transmisiones en vivo ahora mismo.</p>'; return; }
+    const sendBtn = document.getElementById("send-battle-group-invite-btn");
+    if (!others.length) { wrap.innerHTML = '<p class="empty-msg-small">No hay otras transmisiones en vivo ahora mismo.</p>'; sendBtn.classList.add("hidden"); return; }
     wrap.innerHTML = others.map((r) => `
-      <div class="battle-target-row">
+      <label class="battle-target-row" style="cursor:pointer;">
+        <input type="checkbox" data-invite-check="${r.code}" style="width:auto;margin:0 8px 0 0;" />
         <span>${escapeHtml(r.players.join(", ") || "Sala " + r.code)}</span>
-        <button data-invite="${r.code}">⚔️ Desafiar</button>
-      </div>
+      </label>
     `).join("");
-    wrap.querySelectorAll("[data-invite]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        socket.emit("inviteBattle", { targetCode: btn.dataset.invite, durationSeconds: selectedBattleDuration, autoRematchMinutes: selectedBattleRematchMinutes || null });
-        showToast(selectedBattleRematchMinutes ? "Desafío enviado — si se acepta, se va a relanzar sola cada " + selectedBattleRematchMinutes + " min." : "Desafío enviado.");
-      });
-    });
+    sendBtn.classList.remove("hidden");
   } catch (e) {
     wrap.innerHTML = '<p class="empty-msg-small">Error buscando transmisiones.</p>';
   }
 }
+
+document.getElementById("send-battle-group-invite-btn").addEventListener("click", () => {
+  const targetCodes = Array.from(document.querySelectorAll("[data-invite-check]:checked")).map((el) => el.dataset.inviteCheck);
+  if (!targetCodes.length) { showToast("Elegí al menos una transmisión."); return; }
+  socket.emit("inviteBattleGroup", { targetCodes, durationSeconds: selectedBattleDuration, autoRematchMinutes: selectedBattleRematchMinutes || null });
+  showToast("Invitación mandada a " + targetCodes.length + " transmisi" + (targetCodes.length > 1 ? "ones" : "ón") + " — esperando que acepten.");
+});
+
+let currentBattleGroupId = null;
+document.getElementById("start-group-battle-btn").addEventListener("click", () => {
+  if (!currentBattleGroupId) return;
+  socket.emit("startGroupBattle", { groupId: currentBattleGroupId });
+});
 
 document.getElementById("battle-invite-accept-btn").addEventListener("click", () => {
   socket.emit("respondBattleInvite", { accept: true });
@@ -4240,21 +4641,48 @@ document.getElementById("battle-invite-decline-btn").addEventListener("click", (
 });
 
 function wireBattleSocketEvents(sock) {
-  sock.on("battleInviteSent", () => {
-    closeOverlayDropdown("toggle-battle-panel-btn", "battle-panel");
-    showToast("Desafío enviado. Esperando respuesta...");
+  sock.on("battleGroupInviteSent", (data) => {
+    currentBattleGroupId = data.groupId;
+    document.getElementById("battle-roster-box").classList.remove("hidden");
+    document.getElementById("battle-roster-list").textContent = "Vos (esperando que se sumen los demás...)";
+  });
+  sock.on("battleRequestSent", (data) => {
+    showToast("⚔️ Le pediste batalla a " + data.targetHostName + " — esperando que responda.");
+    document.getElementById("battle-panel").classList.add("hidden");
+  });
+  sock.on("battleDoublePoints", (data) => {
+    document.getElementById("battle-bonus-banner").classList.toggle("hidden", !data.active);
+    if (data.active) {
+      document.getElementById("battle-bonus-banner").textContent = "⚡ ¡DOBLE PUNTOS! Los regalos valen x2 por unos segundos";
+      document.getElementById("battle-bonus-banner").className = "battle-bonus-double";
+      showToast("⚡ ¡Doble puntos activado en la batalla!");
+    }
+  });
+  sock.on("battlePkFinal", (data) => {
+    if (data.active) {
+      document.getElementById("battle-bonus-banner").classList.remove("hidden");
+      document.getElementById("battle-bonus-banner").textContent = "🔥 ¡PK FINAL! Últimos segundos, los regalos valen más";
+      document.getElementById("battle-bonus-banner").className = "battle-bonus-pkfinal";
+      showToast("🔥 ¡Arrancó el PK Final de la batalla!");
+    }
   });
   sock.on("battleInvited", (data) => {
     const mins = Math.round(data.durationSeconds / 60);
-    const rematchText = data.autoRematchMinutes ? " Si aceptás, se va a volver a armar sola cada " + data.autoRematchMinutes + " min mientras las dos sigan en vivo." : "";
+    const rematchText = data.autoRematchMinutes ? " Si aceptás, se va a volver a armar sola cada " + data.autoRematchMinutes + " min mientras siga disponible." : "";
     document.getElementById("battle-invite-text").textContent =
-      data.fromName + " te desafió a una batalla LIVE de " + mins + " minuto" + (mins === 1 ? "" : "s") + ". ¿Aceptás?" + rematchText;
+      data.fromName + " te invitó a una batalla LIVE grupal de " + mins + " minuto" + (mins === 1 ? "" : "s") + ". ¿Aceptás?" + rematchText;
     document.getElementById("battle-invite-modal").classList.remove("hidden");
   });
+  sock.on("battleGroupRosterUpdate", (data) => {
+    if (data.groupId !== currentBattleGroupId) return;
+    document.getElementById("battle-roster-box").classList.remove("hidden");
+    document.getElementById("battle-roster-list").textContent = data.roster.join(", ") + " (" + data.roster.length + " lista" + (data.roster.length > 1 ? "s" : "") + " para arrancar)";
+  });
   sock.on("battleDeclined", (data) => {
-    showToast(data.byName + " rechazó tu desafío de batalla.");
+    showToast(data.byName + " rechazó la invitación a la batalla.");
   });
 }
+
 
 function wireModerationSocketEvents(sock) {
   sock.on("liveAdminsEvent", (data) => {
@@ -4315,10 +4743,11 @@ function renderBattle(state) {
   const battle = state.battle;
 
   if (!battle) {
-    if (lastBattleId) { unmountOpponentVideo(); lastBattleId = null; }
+    if (lastBattleId) { unmountAllBattleVideos(); lastBattleId = null; }
     currentBattleInfo = null;
     clearInterval(battleTimerInterval);
     bar.classList.add("hidden");
+    document.getElementById("battle-bonus-banner").classList.add("hidden");
     document.getElementById("battle-result-overlay").classList.add("hidden");
     return;
   }
@@ -4327,50 +4756,53 @@ function renderBattle(state) {
     currentBattleInfo = null;
     clearInterval(battleTimerInterval);
     bar.classList.add("hidden");
-    const myScore = battle.myScore, oppScore = battle.opponentScore;
-    const resultText = myScore === oppScore
-      ? "🤝 ¡Empate! " + myScore + " 💎 a " + oppScore + " 💎"
-      : (myScore > oppScore ? "🏆 ¡Ganaste la batalla!" : "😔 Perdiste la batalla") + " (" + myScore + " ⭐ puntos vs " + oppScore + " ⭐ puntos)";
+    const ranked = battle.participants; // el servidor ya lo manda ordenado de mayor a menor
+    const myRank = ranked.findIndex((p) => p.isMe) + 1;
+    const medals = ["🥇", "🥈", "🥉"];
+    const resultText = myRank === 1 ? "🏆 ¡Ganaste la batalla!" : "Terminaste en el puesto " + myRank + " de " + ranked.length;
     const rematchNote = battle.autoRematchMinutes ? "\n🔁 Se va a relanzar sola en " + battle.autoRematchMinutes + " min." : "";
     document.getElementById("battle-result-text").textContent = resultText + rematchNote;
+    document.getElementById("battle-result-ranking").innerHTML = ranked.map((p, i) => `
+      <div class="battle-rank-row ${p.isMe ? 'battle-rank-me' : ''}">
+        <span class="battle-rank-medal">${medals[i] || (i + 1) + "°"}</span>
+        <span class="battle-rank-name">${escapeHtml(p.name)}${p.isMe ? " (vos)" : ""}</span>
+        <span class="battle-rank-score">⭐ ${p.score}</span>
+      </div>
+    `).join("");
     document.getElementById("battle-result-overlay").classList.remove("hidden");
     return;
   }
 
   document.getElementById("battle-result-overlay").classList.add("hidden");
   bar.classList.remove("hidden");
-  if (lastBattleId !== battle.id) {
-    lastBattleId = battle.id;
-    mountOpponentVideo(battle.opponentCode);
+  const currentRoomCodes = battle.participants.map((p) => p.roomCode).sort().join(",");
+  if (lastBattleId !== battle.id + currentRoomCodes) {
+    lastBattleId = battle.id + currentRoomCodes;
+    mountAllBattleVideos(battle.participants.filter((p) => !p.isMe).map((p) => p.roomCode));
+    // En TikTok, la batalla casi siempre se hace con la cámara prendida de los dos
+    // lados — así se pueden ver y hablar mientras compiten. Si la tuya está apagada,
+    // se lo recordamos (sin obligar a nadie a prenderla).
+    if (!myCamOn) showToast("📷 Che, en las batallas normalmente se ve la cámara de los dos — prendé la tuya si querés que te vean mientras compite.");
   }
   currentBattleInfo = { startedAt: battle.startedAt, durationSeconds: battle.durationSeconds };
   clearInterval(battleTimerInterval);
   tickBattleTimer();
   battleTimerInterval = setInterval(tickBattleTimer, 1000);
 
-  document.getElementById("battle-my-name").textContent = myName;
-  document.getElementById("battle-opponent-name").textContent = battle.opponentName;
-  document.getElementById("battle-my-score").textContent = battle.myScore;
-  document.getElementById("battle-opponent-score").textContent = battle.opponentScore;
-
-  // La espada ⚔️ aparece sola al lado de las gemas, para quien más regaló de cada lado
-  const myTopGifterEl = document.getElementById("battle-my-top-gifter");
-  if (battle.myTopGifter) { myTopGifterEl.textContent = "⚔️ " + battle.myTopGifter; myTopGifterEl.classList.remove("hidden"); }
-  else myTopGifterEl.classList.add("hidden");
-  const oppTopGifterEl = document.getElementById("battle-opponent-top-gifter");
-  if (battle.opponentTopGifter) { oppTopGifterEl.textContent = "⚔️ " + battle.opponentTopGifter; oppTopGifterEl.classList.remove("hidden"); }
-  else oppTopGifterEl.classList.add("hidden");
-
-  const iAmLeading = battle.myScore > battle.opponentScore;
-  const opponentLeading = battle.opponentScore > battle.myScore;
-  document.getElementById("battle-my-block").classList.toggle("leading", iAmLeading);
-  document.getElementById("battle-opponent-block").classList.toggle("leading", opponentLeading);
-  document.getElementById("battle-my-leading-tag").classList.toggle("hidden", !iAmLeading);
-  document.getElementById("battle-opponent-leading-tag").classList.toggle("hidden", !opponentLeading);
-  const total = battle.myScore + battle.opponentScore;
-  const myPct = total > 0 ? (battle.myScore / total) * 100 : 50;
-  document.getElementById("battle-bar-fill-me").style.width = myPct + "%";
-  document.getElementById("battle-bar-fill-opponent").style.width = (100 - myPct) + "%";
+  // Lista de todos los participantes, ya ordenada de mayor a menor puntaje por el
+  // servidor — con una espada ⚔️ para quien más regaló a cada uno.
+  const topScore = battle.participants[0] ? battle.participants[0].score : 0;
+  document.getElementById("battle-scoreboard").innerHTML = battle.participants.map((p, i) => {
+    const pct = topScore > 0 ? Math.max(6, (p.score / topScore) * 100) : 6;
+    const gifterHtml = p.topGifter ? `<span class="battle-top-gifter">⚔️ ${escapeHtml(p.topGifter)}</span>` : "";
+    return `<div class="battle-scoreboard-row ${p.isMe ? 'battle-scoreboard-me' : ''} ${i === 0 ? 'battle-scoreboard-leading' : ''}">
+      <span class="battle-scoreboard-rank">${i + 1}°</span>
+      <span class="battle-scoreboard-name">${escapeHtml(p.name)}${p.isMe ? " (vos)" : ""}</span>
+      <div class="battle-scoreboard-bar-track"><div class="battle-scoreboard-bar-fill" style="width:${pct}%"></div></div>
+      <span class="battle-scoreboard-score">⭐ ${p.score}</span>
+      ${gifterHtml}
+    </div>`;
+  }).join("");
 }
 
 
@@ -4497,8 +4929,9 @@ function appendChatLine(c) {
   const badgeHtml = c.badge ? `<span class="name-badge">${c.badge}</span>` : "";
   const nameStyle = c.nameColor ? ` style="color:${c.nameColor}"` : "";
   const isMuted = mutedNamesSet.has(c.name);
-  textSpan.innerHTML = badgeHtml + "<b" + nameStyle + (c.email ? ' class="chat-line-name-clickable"' : "") + ">" + escapeHtml(c.name) + "</b> " + escapeHtml(c.text) + (isMuted ? ' <span class="mod-tag">🔇</span>' : "");
+  textSpan.innerHTML = badgeHtml + "<b" + nameStyle + (c.email ? ' class="chat-line-name-clickable"' : "") + ">" + escapeHtml(c.name) + "</b> " + renderTextWithMentions(c.text, c.mentions) + (isMuted ? ' <span class="mod-tag">🔇</span>' : "");
   if (c.email) textSpan.querySelector("b").addEventListener("click", () => openUserProfile(c.email));
+  textSpan.querySelectorAll("[data-open-profile]").forEach((el) => el.addEventListener("click", () => openUserProfile(el.dataset.openProfile)));
   line.appendChild(textSpan);
 
   if (amIModerator && c.name !== myName) {
@@ -4534,12 +4967,70 @@ document.getElementById("chat-send-btn").addEventListener("click", sendChatMessa
 document.getElementById("chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChatMessage();
 });
+// ---------------- Etiquetar a una persona con @, como TikTok ----------------
+// Se puede usar en el chat del en vivo y al comentar publicaciones. Mientras escribís
+// "@algo", buscamos gente por nombre y mostramos sugerencias tocables — al elegir una,
+// queda guardada la etiqueta (nombre + email real) aparte del texto, para que después
+// se pueda mostrar como un link tocable a su perfil, sin ambigüedad de nombres repetidos.
+let pendingMentions = []; // [{name, email}] para el próximo mensaje a mandar
+let mentionSearchTimeout = null;
+
+function setupMentionAutocomplete(inputEl, suggestionsEl, mentionsArrayGetter) {
+  inputEl.addEventListener("input", () => {
+    const value = inputEl.value;
+    const cursor = inputEl.selectionStart;
+    const beforeCursor = value.slice(0, cursor);
+    const match = beforeCursor.match(/@([a-zA-Z0-9_ ]{1,20})$/);
+    if (!match) { suggestionsEl.classList.add("hidden"); return; }
+    const query = match[1].trim();
+    if (query.length < 1) { suggestionsEl.classList.add("hidden"); return; }
+    clearTimeout(mentionSearchTimeout);
+    mentionSearchTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/search-players?q=" + encodeURIComponent(query), { headers: { Authorization: "Bearer " + authToken } });
+        const data = await res.json();
+        if (!data.results || !data.results.length) { suggestionsEl.classList.add("hidden"); return; }
+        suggestionsEl.innerHTML = data.results.slice(0, 6).map((p) =>
+          `<button class="mention-suggestion-row" data-mention-name="${escapeHtml(p.name)}" data-mention-email="${escapeHtml(p.email)}">@${escapeHtml(p.name)}</button>`
+        ).join("");
+        suggestionsEl.classList.remove("hidden");
+        suggestionsEl.querySelectorAll("[data-mention-name]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const before = value.slice(0, cursor).replace(/@([a-zA-Z0-9_ ]{1,20})$/, "@" + btn.dataset.mentionName + " ");
+            const after = value.slice(cursor);
+            inputEl.value = before + after;
+            inputEl.focus();
+            mentionsArrayGetter().push({ name: btn.dataset.mentionName, email: btn.dataset.mentionEmail });
+            suggestionsEl.classList.add("hidden");
+          });
+        });
+      } catch (e) { suggestionsEl.classList.add("hidden"); }
+    }, 250);
+  });
+  inputEl.addEventListener("blur", () => setTimeout(() => suggestionsEl.classList.add("hidden"), 150));
+}
+setupMentionAutocomplete(document.getElementById("chat-input"), document.getElementById("mention-suggestions"), () => pendingMentions);
+
+// Convierte "@Nombre" dentro de un texto en un link tocable a su perfil, usando las
+// menciones guardadas (nombre + email real) — así no confunde nombres repetidos.
+function renderTextWithMentions(text, mentions) {
+  if (!mentions || !mentions.length) return escapeHtml(text);
+  let html = escapeHtml(text);
+  mentions.forEach((m) => {
+    const safeName = escapeHtml(m.name);
+    const needle = "@" + safeName;
+    html = html.split(needle).join(`<span class="mention-tag" data-open-profile="${escapeHtml(m.email)}">@${safeName}</span>`);
+  });
+  return html;
+}
+
 function sendChatMessage() {
   const input = document.getElementById("chat-input");
   const text = input.value.trim();
   if (!text || !socket) return;
-  socket.emit("sendComment", { text });
+  socket.emit("sendComment", { text, mentions: pendingMentions });
   input.value = "";
+  pendingMentions = [];
 }
 
 // ---------------- Perfil, datos de cobro y monetización ----------------
