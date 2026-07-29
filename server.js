@@ -5,15 +5,41 @@ const { Server } = require("socket.io");
 const path = require("path");
 const fs = require("fs");
 
+// Conexión a PostgreSQL para respaldar los datos (ver start.js para la explicación
+// completa). Si no hay DATABASE_URL configurada, dbPool queda en null y la app sigue
+// funcionando SOLO con archivos locales, como antes (sin respaldo — no recomendado
+// en producción, porque Render borra el disco en cada deploy/reinicio).
+const { Pool } = require("pg");
+const dbPool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  : null;
+if (!dbPool) {
+  console.warn("[server] Sin DATABASE_URL: los datos NO se están respaldando en una base de datos.");
+}
+
 // Guarda un archivo de datos SIN bloquear el servidor mientras escribe. Antes cada
 // guardado usaba writeFileSync, que congela TODO el servidor (todas las partidas,
 // todos los usuarios conectados) durante el tiempo que tarda en escribir en disco.
 // Con esto, el servidor sigue atendiendo a todo el mundo mientras el guardado
 // termina solo, en segundo plano.
+//
+// Además, cada guardado se respalda en Postgres (si hay DATABASE_URL configurada),
+// así los datos sobreviven a un reinicio o deploy de Render aunque el disco local
+// se borre — start.js los restaura al arrancar de nuevo.
 function writeJSONAsync(filePath, data) {
   fs.writeFile(filePath, JSON.stringify(data, null, 2), (err) => {
     if (err) console.error("Error guardando " + filePath + ":", err.message);
   });
+  if (dbPool) {
+    const key = path.basename(filePath);
+    dbPool
+      .query(
+        `INSERT INTO app_storage (key, data, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (key) DO UPDATE SET data = $2, updated_at = now()`,
+        [key, data]
+      )
+      .catch((err) => console.error("Error respaldando en base de datos (" + key + "):", err.message));
+  }
 }
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -28,10 +54,27 @@ const io = new Server(server);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// DATA_DIR: dónde viven los archivos que la gente sube (avatars, posts, grabaciones,
+// documentos KYC). En Render, configurá esto como la ruta de montaje de un Persistent
+// Disk (ej. /var/data) — así esos archivos sobreviven a los deploys y reinicios, en vez
+// de vivir dentro de la carpeta del proyecto (que Render borra y recrea cada vez).
+// Si no configurás DATA_DIR, usa la carpeta del proyecto como antes (funciona para
+// desarrollo local, pero en producción los archivos se van a seguir perdiendo).
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+if (!process.env.DATA_DIR) {
+  console.warn(
+    "[server] ADVERTENCIA: no hay DATA_DIR configurada. Los avatars, posts, grabaciones " +
+    "y documentos KYC se están guardando dentro de la carpeta del proyecto y se van a " +
+    "perder en el próximo deploy o reinicio. Configurá un Persistent Disk en Render y " +
+    "la variable DATA_DIR apuntando a su ruta de montaje."
+  );
+}
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 // Los documentos de identidad NO van en /public: no queremos que queden
 // accesibles públicamente por su URL. Se guardan aparte y solo el admin
 // autenticado puede pedirlos.
-const KYC_DIR = path.join(__dirname, "uploads_privados", "kyc");
+const KYC_DIR = path.join(DATA_DIR, "uploads_privados", "kyc");
 fs.mkdirSync(KYC_DIR, { recursive: true });
 const kycUpload = multer({
   storage: multer.diskStorage({
@@ -46,8 +89,11 @@ const kycUpload = multer({
 
 // Las fotos de perfil SÍ son públicas (van dentro de /public), a diferencia
 // de los documentos de identidad de arriba.
-const AVATAR_DIR = path.join(__dirname, "public", "avatars");
+const AVATAR_DIR = path.join(DATA_DIR, "avatars");
 fs.mkdirSync(AVATAR_DIR, { recursive: true });
+// Como AVATAR_DIR ya no está dentro de /public, la servimos manualmente en la misma
+// URL de siempre (/avatars/...) para que nada del frontend tenga que cambiar.
+app.use("/avatars", express.static(AVATAR_DIR));
 const avatarUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, AVATAR_DIR),
@@ -65,7 +111,7 @@ const avatarUpload = multer({
 
 // Grabaciones de en vivos y reuniones: privadas (no van en /public), y se borran
 // solas a los 5 días (ver cleanupOldRecordings más abajo).
-const RECORDINGS_DIR = path.join(__dirname, "uploads_privados", "recordings");
+const RECORDINGS_DIR = path.join(DATA_DIR, "uploads_privados", "recordings");
 fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 const recordingUpload = multer({
   storage: multer.diskStorage({
@@ -84,8 +130,11 @@ function isValidEmail(email) {
 }
 
 // Videos y fotos que la gente publica (como TikTok): son públicas, van en /public.
-const POSTS_DIR = path.join(__dirname, "public", "uploads", "posts");
+const POSTS_DIR = path.join(DATA_DIR, "uploads", "posts");
 fs.mkdirSync(POSTS_DIR, { recursive: true });
+// Igual que con los avatars: la servimos manualmente en la misma URL de siempre
+// (/uploads/posts/...) para que nada del frontend tenga que cambiar.
+app.use("/uploads/posts", express.static(POSTS_DIR));
 const postUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, POSTS_DIR),
@@ -665,7 +714,7 @@ app.post("/api/update-profile-info", authMiddleware, avatarUpload.single("avatar
   if (req.file) {
     // Borramos la foto anterior del disco para no ir acumulando archivos sueltos.
     if (u.avatarUrl) {
-      const oldPath = path.join(__dirname, "public", u.avatarUrl.replace(/^\//, ""));
+      const oldPath = path.join(AVATAR_DIR, path.basename(u.avatarUrl));
       fs.unlink(oldPath, () => {});
     }
     u.avatarUrl = "/avatars/" + req.file.filename;
@@ -1389,7 +1438,7 @@ app.get("/api/posts/:id/download", authMiddleware, (req, res) => {
   if (post.type === "text") return res.status(400).json({ error: "Las publicaciones de texto no se pueden descargar como archivo." });
   if (!post.fileUrl) return res.status(400).json({ error: "Esta publicación no tiene un archivo." });
 
-  const sourcePath = path.join(__dirname, "public", post.fileUrl.replace(/^\//, ""));
+  const sourcePath = path.join(POSTS_DIR, path.basename(post.fileUrl));
   if (!fs.existsSync(sourcePath)) return res.status(404).json({ error: "No se encontró el archivo original." });
 
   const ext = post.type === "video" ? "mp4" : "jpg";
@@ -2016,7 +2065,7 @@ app.post("/api/admin/posts/delete", adminOrStaff("parcial"), (req, res) => {
   if (idx === -1) return res.status(404).json({ error: "No encontrada." });
   const [removed] = posts.splice(idx, 1);
   if (removed.fileUrl) {
-    const filePath = path.join(__dirname, "public", removed.fileUrl.replace(/^\//, ""));
+    const filePath = path.join(POSTS_DIR, path.basename(removed.fileUrl));
     fs.unlink(filePath, () => {});
   }
   savePosts(posts);
